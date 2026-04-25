@@ -5,7 +5,7 @@ SETTINGS_FILE = Path(__file__).parent / "settings.json"
 
 DEFAULT_SETTINGS = {
     "grid": {
-        "symbols": ["BTCUSDT" "SOLUSDT"],
+        "symbols": ["BTCUSDT", "SOLUSDT"],  # ← ДОДАНО КОМУ
         "grid_levels": 10,
         "order_size_usdt": 50,
         "lower_percent": 20,
@@ -28,14 +28,11 @@ DEFAULT_SETTINGS = {
     }
 }
 
-
 def load_settings():
-    """Завантаження налаштувань з файлу"""
     if SETTINGS_FILE.exists():
         try:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
-                # Доповнюємо відсутні ключі
                 for key in DEFAULT_SETTINGS:
                     if key not in settings:
                         settings[key] = DEFAULT_SETTINGS[key].copy()
@@ -49,9 +46,7 @@ def load_settings():
             return DEFAULT_SETTINGS.copy()
     return DEFAULT_SETTINGS.copy()
 
-
 def save_settings(settings):
-    """Збереження налаштувань в файл"""
     try:
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(settings, f, indent=4, ensure_ascii=False)
@@ -60,9 +55,7 @@ def save_settings(settings):
         print(f"Помилка збереження налаштувань: {e}")
         return False
 
-
 def save_strategy_settings(strategy_name: str, **kwargs):
-    """Збереження налаштувань конкретної стратегії"""
     settings = load_settings()
     if strategy_name not in settings:
         settings[strategy_name] = DEFAULT_SETTINGS.get(strategy_name, {}).copy()
@@ -72,9 +65,7 @@ def save_strategy_settings(strategy_name: str, **kwargs):
 
     return save_settings(settings)
 
-
 def get_strategy_settings(strategy_name: str):
-    """Отримання налаштувань стратегії"""
     settings = load_settings()
     result = settings.get(strategy_name, {})
     default = DEFAULT_SETTINGS.get(strategy_name, {})

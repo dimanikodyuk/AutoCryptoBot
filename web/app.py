@@ -68,6 +68,15 @@ def create_flask_app(config, trading_engine):
             if strategy.enabled:
                 await trading_engine.stop_strategy(strategy_id)
             else:
+                # При запуску - примусово скидаємо стан grid якщо він не ініціалізований
+                if strategy.name == 'grid' and hasattr(strategy, 'grids'):
+                    for grid in strategy.grids.values():
+                        if not grid.is_initialized and not grid.active_buy_orders:
+                            # Отримуємо ціну та ініціалізуємо
+                            price = await trading_engine.exchange.get_current_price(grid.symbol)
+                            if price > 0:
+                                await grid.initialize_grid(price)
+
                 await trading_engine.start_strategy(strategy_id)
             return jsonify({'success': True, 'enabled': strategy.enabled})
         return jsonify({'error': 'Strategy not found'}), 404
@@ -76,8 +85,30 @@ def create_flask_app(config, trading_engine):
     @async_route
     async def api_reset_strategy(strategy_id):
         if strategy_id in trading_engine.strategies:
-            await trading_engine.strategies[strategy_id].reset()
-            return jsonify({'success': True})
+            strategy = trading_engine.strategies[strategy_id]
+
+            # Зупиняємо стратегію
+            was_enabled = strategy.enabled
+            if was_enabled:
+                await trading_engine.stop_strategy(strategy_id)
+
+            # Виконуємо скидання
+            await strategy.reset()
+
+            # Додатково очищаємо grid стан
+            if hasattr(strategy, 'grids'):
+                for grid in strategy.grids.values():
+                    grid.is_initialized = False
+                    grid.lower_price = None
+                    grid.upper_price = None
+                    grid.grid_spacing = None
+                    grid.active_buy_orders.clear()
+                    grid.active_sell_orders.clear()
+                    grid.price_history.clear()
+                    grid.locked_balance = 0
+
+            # Повертаємо success, але не запускаємо автоматично
+            return jsonify({'success': True, 'was_enabled': was_enabled})
         return jsonify({'error': 'Strategy not found'}), 404
 
     @app.route('/api/reset_all', methods=['POST'])
@@ -663,6 +694,91 @@ def create_flask_app(config, trading_engine):
             'base_power': BASE_POWER_WATTS,
             'max_power': MAX_POWER_WATTS
         })
+
+    @app.route('/api/strategy/<int:strategy_id>/full_reset', methods=['POST'])
+    @async_route
+    async def api_full_reset_strategy(strategy_id):
+        """Повне скидання стратегії з подальшим перезапуском"""
+        if strategy_id in trading_engine.strategies:
+            strategy = trading_engine.strategies[strategy_id]
+
+            # Зупиняємо якщо запущена
+            was_enabled = strategy.enabled
+            if was_enabled:
+                await trading_engine.stop_strategy(strategy_id)
+
+            # Виконуємо повне скидання
+            await strategy.reset()
+
+            # Примусово скидаємо стан GridInstance
+            if hasattr(strategy, 'grids'):
+                for grid in strategy.grids.values():
+                    grid.is_initialized = False
+                    grid.lower_price = None
+                    grid.upper_price = None
+                    grid.grid_spacing = None
+                    grid.active_buy_orders.clear()
+                    grid.active_sell_orders.clear()
+                    grid.price_history.clear()
+                    grid.locked_balance = 0
+
+            # Якщо була запущена - перезапускаємо
+            if was_enabled:
+                await trading_engine.start_strategy(strategy_id)
+
+            return jsonify({'success': True, 'restarted': was_enabled})
+        return jsonify({'error': 'Strategy not found'}), 404
+
+    @app.route('/api/strategy/<int:strategy_id>/force_init', methods=['POST'])
+    @async_route
+    async def api_force_init_strategy(strategy_id):
+        """Примусова ініціалізація сітки без очікування ціни"""
+        if strategy_id in trading_engine.strategies:
+            strategy = trading_engine.strategies[strategy_id]
+
+            if strategy.name == 'grid' and hasattr(strategy, 'grids'):
+                for symbol, grid in strategy.grids.items():
+                    # Отримуємо поточну ціну
+                    price = await trading_engine.exchange.get_current_price(symbol)
+                    if price > 0:
+                        # Примусово скидаємо стан
+                        grid.is_initialized = False
+                        grid.lower_price = None
+                        grid.upper_price = None
+                        grid.active_buy_orders.clear()
+                        grid.active_sell_orders.clear()
+                        # Ініціалізуємо
+                        await grid.initialize_grid(price)
+                        logger.info(f"Примусово ініціалізовано {symbol} за ціною ${price:.2f}")
+
+                return jsonify({'success': True})
+        return jsonify({'error': 'Strategy not found'}), 404
+
+    @app.route('/api/strategy/<int:strategy_id>/status', methods=['GET'])
+    @async_route
+    async def api_strategy_status(strategy_id):
+        """Детальний статус стратегії для діагностики"""
+        if strategy_id in trading_engine.strategies:
+            strategy = trading_engine.strategies[strategy_id]
+            status = await strategy.get_status()
+
+            # Додаємо деталі grid
+            if strategy.name == 'grid' and hasattr(strategy, 'grids'):
+                grid_details = {}
+                for symbol, grid in strategy.grids.items():
+                    grid_details[symbol] = {
+                        'is_initialized': grid.is_initialized,
+                        'lower_price': grid.lower_price,
+                        'upper_price': grid.upper_price,
+                        'buy_orders': len(grid.active_buy_orders),
+                        'sell_orders': len(grid.active_sell_orders),
+                        'locked_balance': grid.locked_balance,
+                        'available_balance': grid.available_balance
+                    }
+                status['grid_details'] = grid_details
+
+            return jsonify(status)
+        return jsonify({'error': 'Strategy not found'}), 404
 
     # ============= Новинна стратегія API =============
 
