@@ -183,6 +183,23 @@ class GridStrategy(BaseStrategy):
             }
         return {'error': 'Symbol not found'}
 
+    async def send_grid_rebalance_notification(self, symbol: str, old_lower: float, old_upper: float,
+                                               new_lower: float, new_upper: float, grid_spacing: float,
+                                               atr: float, cancelled_orders: int):
+        """Сповіщення про перебудову сітки"""
+        if self.telegram_bot:
+            message = (
+                f"🔄 *ПЕРЕБУДОВА СІТКИ* 🔄\n"
+                f"└ Символ: `{symbol}`\n"
+                f"└ Причина: адаптація до волатильності\n"
+                f"└ Старий діапазон: `{old_lower:.2f} - {old_upper:.2f}`\n"
+                f"└ Новий діапазон: `{new_lower:.2f} - {new_upper:.2f}`\n"
+                f"└ ATR: `${atr:.2f}`\n"
+                f"└ Крок сітки: `${grid_spacing:.2f}`\n"
+                f"└ Скасовано ордерів: {cancelled_orders}"
+            )
+            await self.telegram_bot.send_notification(message, parse_mode='Markdown')
+
     async def reset(self):
         for g in self.grids.values():
             for oid in list(g.active_buy_orders.keys()):

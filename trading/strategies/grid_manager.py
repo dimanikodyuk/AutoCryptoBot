@@ -1,5 +1,6 @@
 import logging
 import uuid
+import numpy as np
 from datetime import datetime
 from typing import Dict, List
 from utils.logger_utils import setup_logger
@@ -9,7 +10,7 @@ logger = setup_logger('grid_manager')
 
 
 class GridInstance:
-    """Окремий екземпляр Grid стратегії для однієї пари"""
+    """Окремий екземпляр Grid стратегії для однієї пари - АДАПТИВНА СІТКА"""
 
     def __init__(self, symbol: str, strategy_id: int, exchange, grid_levels: int = 10,
                  order_size_usdt: float = 50, lower_percent: float = 20, upper_percent: float = 20,
@@ -40,6 +41,8 @@ class GridInstance:
         self.locked_balance = 0.0
 
         self.is_initialized = False
+        self.last_rebalance_price = 0
+        self.price_history = []  # Історія цін для розрахунку волатильності
 
         self._load_history()
 
@@ -76,7 +79,8 @@ class GridInstance:
                     self.active_buy_orders[order_dict['order_id']] = order_dict
                 else:
                     self.active_sell_orders[order_dict['order_id']] = order_dict
-            logger.info(f"[{self.symbol}] Завантажено {len(self.active_buy_orders)} BUY, {len(self.active_sell_orders)} SELL")
+            logger.info(
+                f"[{self.symbol}] Завантажено {len(self.active_buy_orders)} BUY, {len(self.active_sell_orders)} SELL")
 
     def _restore_grid_from_orders(self):
         try:
@@ -106,18 +110,89 @@ class GridInstance:
     def _generate_pair_id(self) -> str:
         return f"pair_{self.symbol}_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:6]}"
 
+    async def _calculate_atr(self) -> float:
+        """Розрахунок ATR (Average True Range) для адаптивного діапазону"""
+        try:
+            # Отримуємо 30 свічок по 15 хвилин
+            klines = await self.exchange.get_klines(self.symbol, interval='15', limit=30)
+            if not klines or len(klines) < 15:
+                return 0
+
+            # Розрахунок True Range
+            true_ranges = []
+            for i in range(1, len(klines)):
+                high = klines[i]['high']
+                low = klines[i]['low']
+                prev_close = klines[i - 1]['close']
+
+                tr1 = high - low
+                tr2 = abs(high - prev_close)
+                tr3 = abs(low - prev_close)
+                true_range = max(tr1, tr2, tr3)
+                true_ranges.append(true_range)
+
+            if not true_ranges:
+                return 0
+
+            # ATR = середнє True Range за останні 14 періодів
+            atr = sum(true_ranges[-14:]) / min(14, len(true_ranges))
+            return atr
+
+        except Exception as e:
+            logger.error(f"[{self.symbol}] Помилка розрахунку ATR: {e}")
+            return 0
+
+    def _calculate_adaptive_range(self, current_price: float, atr: float) -> tuple:
+        """Розрахунок адаптивного діапазону на основі ATR"""
+        if atr <= 0:
+            return self.lower_percent, self.upper_percent
+
+        # ATR у відсотках від поточної ціни
+        atr_percent = (atr / current_price) * 100
+
+        # Адаптивний діапазон: 2-3 x ATR, але не менше 10% і не більше 40%
+        adaptive_range = max(10, min(40, atr_percent * 2.5))
+
+        # Коригуємо на кількість рівнів (чим більше рівнів, тим менший крок)
+        step_correction = 1.0
+        if self.grid_levels > 15:
+            step_correction = 0.8
+        elif self.grid_levels < 6:
+            step_correction = 1.2
+
+        adaptive_range = adaptive_range * step_correction
+        adaptive_range = max(8, min(50, adaptive_range))
+
+        logger.info(
+            f"[{self.symbol}] Адаптивний діапазон: {adaptive_range:.1f}% (ATR: {atr:.2f}, ATR%: {atr_percent:.2f}%)")
+
+        return adaptive_range, adaptive_range
+
     async def initialize_grid(self, current_price: float):
         if self.active_buy_orders or self.active_sell_orders:
             logger.info(f"[{self.symbol}] Вже є активні ордери, пропускаємо ініціалізацію")
             self.is_initialized = True
             return
 
+        # Розраховуємо адаптивний діапазон
+        atr = await self._calculate_atr()
+        adaptive_lower, adaptive_upper = self._calculate_adaptive_range(current_price, atr)
+
+        # Оновлюємо відсотки (тимчасово для цієї ініціалізації)
+        use_lower_percent = adaptive_lower
+        use_upper_percent = adaptive_upper
+
         self.current_price = current_price
-        self.lower_price = current_price * (1 - self.lower_percent / 100)
-        self.upper_price = current_price * (1 + self.upper_percent / 100)
+        self.lower_price = current_price * (1 - use_lower_percent / 100)
+        self.upper_price = current_price * (1 + use_upper_percent / 100)
         self.grid_spacing = (self.upper_price - self.lower_price) / self.grid_levels
 
-        logger.info(f"[{self.symbol}] Ініціалізація сітки: діапазон {self.lower_price:.2f} - {self.upper_price:.2f}")
+        logger.info(f"[{self.symbol}] ========== АДАПТИВНА ІНІЦІАЛІЗАЦІЯ СІТКИ ==========")
+        logger.info(f"[{self.symbol}] Поточна ціна: ${current_price:.2f}")
+        logger.info(f"[{self.symbol}] Адаптивний діапазон: {use_lower_percent:.1f}% - {use_upper_percent:.1f}%")
+        logger.info(f"[{self.symbol}] Діапазон цін: ${self.lower_price:.2f} - ${self.upper_price:.2f}")
+        logger.info(
+            f"[{self.symbol}] Крок сітки: ${self.grid_spacing:.2f} ({self.grid_spacing / current_price * 100:.2f}%)")
 
         current_level = int((current_price - self.lower_price) / self.grid_spacing)
         current_level = max(0, min(current_level, self.grid_levels))
@@ -146,11 +221,13 @@ class GridInstance:
                 orders_created += 1
                 add_log("INFO", "grid", f"[{self.symbol}] Створено BUY @ {buy_price:.2f} (заблоковано ${cost:.2f})")
             else:
-                logger.warning(f"[{self.symbol}] Недостатньо доступного балансу (потрібно ${cost:.2f}, є ${self.available_balance:.2f})")
+                logger.warning(
+                    f"[{self.symbol}] Недостатньо доступного балансу (потрібно ${cost:.2f}, є ${self.available_balance:.2f})")
                 break
 
         self.is_initialized = True
-        logger.info(f"[{self.symbol}] Створено {orders_created} BUY ордерів")
+        self.last_rebalance_price = current_price
+        logger.info(f"[{self.symbol}] Створено {orders_created} BUY ордерів з {buy_levels_count} можливих")
 
     async def cancel_order(self, order_id: str) -> bool:
         order = None
@@ -177,29 +254,106 @@ class GridInstance:
         return True
 
     async def update_price(self, price: float):
+        # Додаємо ціну в історію
+        self.price_history.append(price)
+        if len(self.price_history) > 30:
+            self.price_history.pop(0)
+
+        old_price = self.current_price
         self.current_price = price
+
+        # Ініціалізація при першому запуску
         if not self.is_initialized and not self.active_buy_orders and not self.active_sell_orders:
             await self.initialize_grid(price)
             return
 
-        if not self.is_initialized and (self.active_buy_orders or self.active_sell_orders):
-            self.is_initialized = True
-
         if self.lower_price is None:
             return
 
-        if price > self.upper_price or price < self.lower_price:
-            logger.info(f"[{self.symbol}] Ціна {price} вийшла за межі, ребаланс...")
-            await self.rebalance(price)
+        # Розрахунок зміни ціни
+        price_change_pct = abs(price - old_price) / old_price * 100 if old_price > 0 else 0
+
+        # АДАПТИВНЕ РЕБАЛАНСУВАННЯ при значній зміні ціни (3%)
+        if price_change_pct > 3:
+            logger.info(
+                f"[{self.symbol}] Значна зміна ціни: {price_change_pct:.2f}%, перевіряємо необхідність адаптації...")
+            await self.adaptive_rebalance(price)
             return
 
+        # Перевірка виходу за межі сітки
+        if price > self.upper_price or price < self.lower_price:
+            logger.info(
+                f"[{self.symbol}] Ціна ${price:.2f} вийшла за межі сітки [{self.lower_price:.2f} - {self.upper_price:.2f}]")
+            await self.adaptive_rebalance(price)
+            return
+
+        # Виконання BUY ордерів
         for oid, order in list(self.active_buy_orders.items()):
             if price <= order['price']:
                 await self._on_buy_filled(oid, order, price)
 
+        # Виконання SELL ордерів
         for oid, order in list(self.active_sell_orders.items()):
             if price >= order['price']:
                 await self._on_sell_filled(oid, order, price)
+
+    async def adaptive_rebalance(self, current_price: float):
+        """Адаптивне ребалансування з перерахунком діапазону на основі волатильності"""
+        logger.info(f"[{self.symbol}] ========== АДАПТИВНЕ РЕБАЛАНСУВАННЯ ==========")
+
+        atr = await self._calculate_atr()
+        adaptive_lower, adaptive_upper = self._calculate_adaptive_range(current_price, atr)
+
+        old_lower = self.lower_price
+        old_upper = self.upper_price
+        old_range_pct = ((old_upper - old_lower) / old_lower * 100) if old_lower else 0
+
+        self.lower_percent = adaptive_lower
+        self.upper_percent = adaptive_upper
+
+        need_full_rebalance = False
+        new_range_pct = adaptive_lower + adaptive_upper
+
+        if old_lower and old_upper:
+            if abs(new_range_pct - old_range_pct) > 15:
+                logger.info(
+                    f"[{self.symbol}] Діапазон змінився значно ({old_range_pct:.1f}% -> {new_range_pct:.1f}%), повне перестворення")
+                need_full_rebalance = True
+
+        # ПІДГОТОВКА СПОВІЩЕННЯ
+        notification_msg = (
+            f"🔄 *ПЕРЕБУДОВА СІТКИ* 🔄\n"
+            f"└ Символ: `{self.symbol}`\n"
+            f"└ Причина: адаптація до волатильності\n"
+            f"└ Старий діапазон: `{old_lower:.2f} - {old_upper:.2f}` ({old_range_pct:.1f}%)\n"
+            f"└ Новий діапазон: `{self.lower_price:.2f} - {self.upper_price:.2f}` ({new_range_pct:.1f}%)\n"
+            f"└ ATR: `${atr:.2f}` ({atr / current_price * 100:.2f}%)\n"
+            f"└ Крок сітки: `${self.grid_spacing:.2f}`\n"
+            f"└ Активних ордерів скасовано: {len(self.active_buy_orders) + len(self.active_sell_orders)}"
+        )
+
+        # Скасовуємо всі активні ордери
+        for oid in list(self.active_buy_orders.keys()):
+            await self.cancel_order(oid)
+        for oid in list(self.active_sell_orders.keys()):
+            await self.cancel_order(oid)
+
+        # Створюємо нову сітку
+        self.is_initialized = False
+        self.lower_price = None
+        self.upper_price = None
+
+        await self.initialize_grid(current_price)
+
+        # ВІДПРАВЛЕННЯ СПОВІЩЕННЯ ПРО ПЕРЕБУДОВУ
+        if self.parent_strategy and hasattr(self.parent_strategy, 'send_grid_rebalance_notification'):
+            await self.parent_strategy.send_grid_rebalance_notification(
+                self.symbol, old_lower, old_upper, self.lower_price, self.upper_price,
+                self.grid_spacing, atr, len(self.active_buy_orders) + len(self.active_sell_orders)
+            )
+        elif self.parent_strategy and hasattr(self.parent_strategy, 'send_notification'):
+            await self.parent_strategy.send_notification('grid', self.symbol, 'rebalance', 0, 0, None,
+                                                         extra_msg=notification_msg)
 
     async def _on_buy_filled(self, order_id: str, buy_order: dict, current_price: float):
         sell_price = buy_order['price'] + self.grid_spacing
@@ -225,11 +379,12 @@ class GridInstance:
         }
         self._save_order(sell_order_id, buy_order['pair_id'], 'sell', sell_price, buy_order['quantity'], 'open')
         del self.active_buy_orders[order_id]
-        add_log("INFO", "grid", f"[{self.symbol}] BUY виконано @ {buy_order['price']:.2f}, створено SELL @ {sell_price:.2f}")
+        add_log("INFO", "grid",
+                f"[{self.symbol}] BUY виконано @ {buy_order['price']:.2f}, створено SELL @ {sell_price:.2f}")
 
-        # Сповіщення
         if self.parent_strategy and hasattr(self.parent_strategy, 'send_notification'):
-            await self.parent_strategy.send_notification('grid', self.symbol, 'buy', buy_order['price'], buy_order['quantity'])
+            await self.parent_strategy.send_notification('grid', self.symbol, 'buy', buy_order['price'],
+                                                         buy_order['quantity'])
 
         if current_price >= sell_price:
             await self._on_sell_filled(sell_order_id, self.active_sell_orders[sell_order_id], current_price)
@@ -262,10 +417,12 @@ class GridInstance:
             self.losing_trades += 1
 
         with get_db() as conn:
-            conn.execute("UPDATE orders SET status = 'closed', closed_at = ?, pnl = ?, commission = ? WHERE order_id = ?",
-                         (datetime.now().isoformat(), pnl, buy_commission, buy_order['order_id']))
-            conn.execute("UPDATE orders SET status = 'closed', closed_at = ?, pnl = ?, commission = ? WHERE order_id = ?",
-                         (datetime.now().isoformat(), pnl, sell_commission, sell_order['order_id']))
+            conn.execute(
+                "UPDATE orders SET status = 'closed', closed_at = ?, pnl = ?, commission = ? WHERE order_id = ?",
+                (datetime.now().isoformat(), pnl, buy_commission, buy_order['order_id']))
+            conn.execute(
+                "UPDATE orders SET status = 'closed', closed_at = ?, pnl = ?, commission = ? WHERE order_id = ?",
+                (datetime.now().isoformat(), pnl, sell_commission, sell_order['order_id']))
 
         del self.active_sell_orders[order_id]
         if buy_order['order_id'] in self.active_buy_orders:
@@ -273,9 +430,9 @@ class GridInstance:
         self.locked_balance -= sell_order['quantity'] * sell_order['price']
         add_log("INFO", "grid", f"[{self.symbol}] SELL виконано @ {sell_order['price']:.2f}, PnL: ${pnl:.2f}")
 
-        # Сповіщення
         if self.parent_strategy and hasattr(self.parent_strategy, 'send_notification'):
-            await self.parent_strategy.send_notification('grid', self.symbol, 'sell', sell_order['price'], sell_order['quantity'], pnl)
+            await self.parent_strategy.send_notification('grid', self.symbol, 'sell', sell_order['price'],
+                                                         sell_order['quantity'], pnl)
 
         new_buy_price = sell_order['price'] - self.grid_spacing
         if new_buy_price >= self.lower_price:
@@ -298,10 +455,26 @@ class GridInstance:
                 add_log("INFO", "grid", f"[{self.symbol}] Новий BUY @ {new_buy_price:.2f}")
 
     async def rebalance(self, current_price: float):
+        """Просте ребалансування (без адаптації)"""
+        cancelled_count = len(self.active_buy_orders) + len(self.active_sell_orders)
+
         for oid in list(self.active_buy_orders.keys()):
             await self.cancel_order(oid)
         for oid in list(self.active_sell_orders.keys()):
             await self.cancel_order(oid)
+
+        # Сповіщення про ребаланс
+        if self.parent_strategy and hasattr(self.parent_strategy, 'telegram_bot') and self.parent_strategy.telegram_bot:
+            message = (
+                f"🔄 *РЕБАЛАНС СІТКИ* 🔄\n"
+                f"└ Символ: `{self.symbol}`\n"
+                f"└ Причина: вихід за межі діапазону\n"
+                f"└ Стара ціна: `${self.current_price:.2f}`\n"
+                f"└ Нова ціна: `${current_price:.2f}`\n"
+                f"└ Скасовано ордерів: {cancelled_count}"
+            )
+            await self.parent_strategy.telegram_bot.send_notification(message, parse_mode='Markdown')
+
         self.is_initialized = False
         await self.initialize_grid(current_price)
 
@@ -346,8 +519,10 @@ class GridInstance:
                 base_type = 'buy'
             elif price > current_price:
                 base_type = 'sell'
-            is_active_buy = any(abs(order['price'] - price) < self.grid_spacing / 2 for order in self.active_buy_orders.values())
-            is_active_sell = any(abs(order['price'] - price) < self.grid_spacing / 2 for order in self.active_sell_orders.values())
+            is_active_buy = any(
+                abs(order['price'] - price) < self.grid_spacing / 2 for order in self.active_buy_orders.values())
+            is_active_sell = any(
+                abs(order['price'] - price) < self.grid_spacing / 2 for order in self.active_sell_orders.values())
             if is_active_buy:
                 level_type = 'active_buy'
             elif is_active_sell:
