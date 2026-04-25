@@ -169,9 +169,17 @@ class GridInstance:
         return adaptive_range, adaptive_range
 
     async def initialize_grid(self, current_price: float):
+        """Ініціалізація сітки з перевіркою балансу"""
         if self.active_buy_orders or self.active_sell_orders:
             logger.info(f"[{self.symbol}] Вже є активні ордери, пропускаємо ініціалізацію")
             self.is_initialized = True
+            return
+
+        # Перевіряємо чи достатньо балансу
+        if self.available_balance < self.order_size_usdt:
+            logger.warning(f"[{self.symbol}] Недостатньо балансу для створення сітки. "
+                           f"Доступно: ${self.available_balance:.2f}, "
+                           f"Потрібно мінімум: ${self.order_size_usdt:.2f}")
             return
 
         # Розраховуємо адаптивний діапазон
@@ -197,8 +205,11 @@ class GridInstance:
         current_level = int((current_price - self.lower_price) / self.grid_spacing)
         current_level = max(0, min(current_level, self.grid_levels))
         buy_levels_count = current_level
+        sell_levels_count = self.grid_levels - current_level
 
         orders_created = 0
+
+        # Створюємо BUY ордери (нижче поточної ціни)
         for i in range(buy_levels_count):
             buy_price = self.lower_price + i * self.grid_spacing
             quantity = self.order_size_usdt / buy_price
@@ -225,9 +236,49 @@ class GridInstance:
                     f"[{self.symbol}] Недостатньо доступного балансу (потрібно ${cost:.2f}, є ${self.available_balance:.2f})")
                 break
 
+        # Створюємо SELL ордери (вище поточної ціни)
+        for i in range(sell_levels_count):
+            sell_price = self.lower_price + (current_level + i + 1) * self.grid_spacing
+            quantity = self.order_size_usdt / sell_price
+            cost = quantity * sell_price
+
+            if self.available_balance >= cost:
+                pair_id = self._generate_pair_id()
+                order_id = f"sell_{self.symbol}_{int(sell_price)}_{uuid.uuid4().hex[:8]}"
+                self.active_sell_orders[order_id] = {
+                    'order_id': order_id,
+                    'pair_id': pair_id,
+                    'symbol': self.symbol,
+                    'side': 'sell',
+                    'price': sell_price,
+                    'quantity': quantity,
+                    'created_at': datetime.now().isoformat()
+                }
+                self.locked_balance += cost
+                self._save_order(order_id, pair_id, 'sell', sell_price, quantity, 'open')
+                orders_created += 1
+                add_log("INFO", "grid", f"[{self.symbol}] Створено SELL @ {sell_price:.2f} (заблоковано ${cost:.2f})")
+            else:
+                logger.warning(
+                    f"[{self.symbol}] Недостатньо доступного балансу для SELL ордера (потрібно ${cost:.2f})")
+                break
+
         self.is_initialized = True
         self.last_rebalance_price = current_price
-        logger.info(f"[{self.symbol}] Створено {orders_created} BUY ордерів з {buy_levels_count} можливих")
+        logger.info(
+            f"[{self.symbol}] Створено {orders_created} ордерів (BUY: {buy_levels_count}, SELL: {sell_levels_count})")
+
+        # Відправляємо сповіщення про успішний запуск сітки
+        if self.parent_strategy and hasattr(self.parent_strategy, 'telegram_bot') and self.parent_strategy.telegram_bot:
+            message = (
+                f"✅ *СІТКУ ЗАПУЩЕНО* ✅\n"
+                f"└ Символ: `{self.symbol}`\n"
+                f"└ Ціна: `${current_price:.2f}`\n"
+                f"└ Діапазон: `${self.lower_price:.2f}` - `${self.upper_price:.2f}`\n"
+                f"└ Рівнів: {self.grid_levels}\n"
+                f"└ Ордерів створено: {orders_created}"
+            )
+            await self.parent_strategy.telegram_bot.send_notification(message, parse_mode='Markdown')
 
     async def cancel_order(self, order_id: str) -> bool:
         order = None
@@ -243,9 +294,7 @@ class GridInstance:
         else:
             return False
 
-        if side == 'buy':
-            self.locked_balance -= order['quantity'] * order['price']
-        else:
+        if order:
             self.locked_balance -= order['quantity'] * order['price']
 
         with get_db() as conn:
@@ -267,7 +316,9 @@ class GridInstance:
             await self.initialize_grid(price)
             return
 
-        if self.lower_price is None:
+        if self.lower_price is None or self.upper_price is None:
+            logger.warning(f"[{self.symbol}] lower_price або upper_price = None, повторна ініціалізація")
+            await self.initialize_grid(price)
             return
 
         # Розрахунок зміни ціни
@@ -311,28 +362,15 @@ class GridInstance:
         self.lower_percent = adaptive_lower
         self.upper_percent = adaptive_upper
 
-        need_full_rebalance = False
         new_range_pct = adaptive_lower + adaptive_upper
 
-        if old_lower and old_upper:
-            if abs(new_range_pct - old_range_pct) > 15:
-                logger.info(
-                    f"[{self.symbol}] Діапазон змінився значно ({old_range_pct:.1f}% -> {new_range_pct:.1f}%), повне перестворення")
-                need_full_rebalance = True
-
-        # ПІДГОТОВКА СПОВІЩЕННЯ
-        notification_msg = (
-            f"🔄 *ПЕРЕБУДОВА СІТКИ* 🔄\n"
-            f"└ Символ: `{self.symbol}`\n"
-            f"└ Причина: адаптація до волатильності\n"
-            f"└ Старий діапазон: `{old_lower:.2f} - {old_upper:.2f}` ({old_range_pct:.1f}%)\n"
-            f"└ Новий діапазон: `{self.lower_price:.2f} - {self.upper_price:.2f}` ({new_range_pct:.1f}%)\n"
-            f"└ ATR: `${atr:.2f}` ({atr / current_price * 100:.2f}%)\n"
-            f"└ Крок сітки: `${self.grid_spacing:.2f}`\n"
-            f"└ Активних ордерів скасовано: {len(self.active_buy_orders) + len(self.active_sell_orders)}"
-        )
+        # Зберігаємо старі значення для сповіщення
+        old_lower_save = self.lower_price
+        old_upper_save = self.upper_price
 
         # Скасовуємо всі активні ордери
+        cancelled_count = len(self.active_buy_orders) + len(self.active_sell_orders)
+
         for oid in list(self.active_buy_orders.keys()):
             await self.cancel_order(oid)
         for oid in list(self.active_sell_orders.keys()):
@@ -346,14 +384,24 @@ class GridInstance:
         await self.initialize_grid(current_price)
 
         # ВІДПРАВЛЕННЯ СПОВІЩЕННЯ ПРО ПЕРЕБУДОВУ
-        if self.parent_strategy and hasattr(self.parent_strategy, 'send_grid_rebalance_notification'):
-            await self.parent_strategy.send_grid_rebalance_notification(
-                self.symbol, old_lower, old_upper, self.lower_price, self.upper_price,
-                self.grid_spacing, atr, len(self.active_buy_orders) + len(self.active_sell_orders)
-            )
-        elif self.parent_strategy and hasattr(self.parent_strategy, 'send_notification'):
-            await self.parent_strategy.send_notification('grid', self.symbol, 'rebalance', 0, 0, None,
-                                                         extra_msg=notification_msg)
+        if old_lower_save and old_upper_save:
+            if self.parent_strategy and hasattr(self.parent_strategy, 'send_grid_rebalance_notification'):
+                await self.parent_strategy.send_grid_rebalance_notification(
+                    self.symbol, old_lower_save, old_upper_save, self.lower_price, self.upper_price,
+                    self.grid_spacing, atr, cancelled_count
+                )
+            elif self.parent_strategy and hasattr(self.parent_strategy,
+                                                  'telegram_bot') and self.parent_strategy.telegram_bot:
+                message = (
+                    f"🔄 *ПЕРЕБУДОВА СІТКИ* 🔄\n"
+                    f"└ Символ: `{self.symbol}`\n"
+                    f"└ Причина: адаптація до волатильності\n"
+                    f"└ Старий діапазон: `${old_lower_save:.2f} - ${old_upper_save:.2f}`\n"
+                    f"└ Новий діапазон: `${self.lower_price:.2f} - ${self.upper_price:.2f}`\n"
+                    f"└ ATR: `${atr:.2f}`\n"
+                    f"└ Скасовано ордерів: {cancelled_count}"
+                )
+                await self.parent_strategy.telegram_bot.send_notification(message, parse_mode='Markdown')
 
     async def _on_buy_filled(self, order_id: str, buy_order: dict, current_price: float):
         sell_price = buy_order['price'] + self.grid_spacing
@@ -509,7 +557,7 @@ class GridInstance:
         }
 
     def get_grid_levels(self, current_price: float) -> List[dict]:
-        if not self.lower_price or not self.upper_price:
+        if not self.lower_price or not self.upper_price or self.grid_spacing is None:
             return []
         levels = []
         for i in range(self.grid_levels + 1):

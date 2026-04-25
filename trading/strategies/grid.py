@@ -38,6 +38,7 @@ class GridStrategy(BaseStrategy):
 
     async def start(self):
         await super().start()
+        self.enabled = True  # ← ВИПРАВЛЕНО: встановлюємо enabled в True
         save_strategy_settings('grid', enabled=True)
         self._analysis_task = asyncio.create_task(self._analysis_loop())
         logger.info("GridStrategy: цикл аналізу запущено")
@@ -45,6 +46,7 @@ class GridStrategy(BaseStrategy):
             await self.telegram_bot.send_strategy_status(self.name, True)
 
     async def stop(self):
+        self.enabled = False  # ← ВИПРАВЛЕНО: встановлюємо enabled в False
         if self._analysis_task:
             self._analysis_task.cancel()
         await super().stop()
@@ -72,22 +74,27 @@ class GridStrategy(BaseStrategy):
 
     def _load_all_history(self):
         with get_db() as conn:
-            bal = conn.execute("SELECT amount FROM balances WHERE strategy_id=? AND asset='USDT' AND symbol IS NULL", (self.strategy_id,)).fetchone()
+            bal = conn.execute("SELECT amount FROM balances WHERE strategy_id=? AND asset='USDT' AND symbol IS NULL",
+                               (self.strategy_id,)).fetchone()
             if bal:
                 self.total_balance = bal['amount']
             else:
                 self.total_balance = 100.0
                 self._save_balance()
-            stats = conn.execute("SELECT SUM(pnl) as pnl, COUNT(*) as cnt FROM orders WHERE strategy_id=? AND status='closed'", (self.strategy_id,)).fetchone()
+            stats = conn.execute(
+                "SELECT SUM(pnl) as pnl, COUNT(*) as cnt FROM orders WHERE strategy_id=? AND status='closed'",
+                (self.strategy_id,)).fetchone()
             if stats and stats['pnl']:
                 self.total_pnl = stats['pnl']
                 self.total_trades = stats['cnt']
-            win = conn.execute("SELECT COUNT(*) FROM orders WHERE strategy_id=? AND status='closed' AND pnl>0", (self.strategy_id,)).fetchone()
+            win = conn.execute("SELECT COUNT(*) FROM orders WHERE strategy_id=? AND status='closed' AND pnl>0",
+                               (self.strategy_id,)).fetchone()
             self.winning_trades = win[0] if win else 0
 
     def _save_balance(self):
         with get_db() as conn:
-            conn.execute("DELETE FROM balances WHERE strategy_id=? AND asset='USDT' AND symbol IS NULL", (self.strategy_id,))
+            conn.execute("DELETE FROM balances WHERE strategy_id=? AND asset='USDT' AND symbol IS NULL",
+                         (self.strategy_id,))
             conn.execute("INSERT INTO balances (strategy_id, asset, amount, mode, updated_at) VALUES (?,?,?,?,?)",
                          (self.strategy_id, 'USDT', self.total_balance, self.mode, datetime.now().isoformat()))
 
@@ -147,7 +154,8 @@ class GridStrategy(BaseStrategy):
             return await self.grids[symbol].cancel_order(order_id)
         return False
 
-    async def send_notification(self, strategy: str, symbol: str, side: str, price: float, quantity: float, pnl: float = None):
+    async def send_notification(self, strategy: str, symbol: str, side: str, price: float, quantity: float,
+                                pnl: float = None):
         if self.telegram_bot:
             await self.telegram_bot.send_trade_notification(strategy, symbol, side, price, quantity, pnl)
 
@@ -201,27 +209,42 @@ class GridStrategy(BaseStrategy):
             await self.telegram_bot.send_notification(message, parse_mode='Markdown')
 
     async def reset(self):
+        """Повне скидання стратегії з очищенням усіх даних"""
         for g in self.grids.values():
+            # Скасовуємо всі активні ордери
             for oid in list(g.active_buy_orders.keys()):
                 await g.cancel_order(oid)
             for oid in list(g.active_sell_orders.keys()):
                 await g.cancel_order(oid)
+            # Скидаємо стан GridInstance
             g.total_pnl = 0
             g.total_trades = 0
             g.winning_trades = 0
+            g.losing_trades = 0
             g.locked_balance = 0
             g.lower_price = None
             g.upper_price = None
+            g.grid_spacing = None
             g.is_initialized = False
+            g.price_history = []  # ← ВИПРАВЛЕНО: очищуємо історію цін
+            g.active_buy_orders = {}
+            g.active_sell_orders = {}
+            g.closed_pairs = []
+
+        # Скидаємо глобальні показники
         self.total_balance = 100.0
         self.total_pnl = 0.0
         self.total_trades = 0
         self.winning_trades = 0
+
+        # Очищаємо БД
         with get_db() as conn:
             conn.execute("DELETE FROM orders WHERE strategy_id=?", (self.strategy_id,))
             conn.execute("DELETE FROM balances WHERE strategy_id=?", (self.strategy_id,))
+
         self._save_balance()
         add_log("INFO", self.name, "Стратегію скинуто")
+        logger.info(f"GridStrategy: повне скидання виконано")
 
     async def emergency_stop(self):
         await self.stop()
