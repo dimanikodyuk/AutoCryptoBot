@@ -76,7 +76,7 @@ class CryptoBot:
     def _run_flask(self):
         """Запуск Flask в окремому потоці"""
         try:
-            port = int(os.environ.get('FLASK_PORT', 5000))
+            port = int(os.environ.get('FLASK_PORT', 8080))
             self.flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
         except Exception as e:
             logger.error(f"Помилка запуску Flask: {e}")
