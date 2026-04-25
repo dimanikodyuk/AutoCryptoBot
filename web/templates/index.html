@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Crypto Trading Bot</title>
+    <meta charset="UTF-8">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #0f0f1a;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00d4ff;
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #888;
+            font-size: 18px;
+            margin: 20px 0 10px 0;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid #2a2a4a;
+        }
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+        .strategies-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .strategy-card {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #2a2a4a;
+        }
+        .strategy-card.active {
+            border-left: 4px solid #00ff88;
+        }
+        .strategy-card.inactive {
+            border-left: 4px solid #ff4444;
+        }
+        .strategy-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .strategy-name {
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .strategy-status {
+            font-size: 12px;
+            padding: 4px 12px;
+            border-radius: 20px;
+        }
+        .status-active {
+            background: #00ff8822;
+            color: #00ff88;
+        }
+        .status-inactive {
+            background: #ff444422;
+            color: #ff4444;
+        }
+        .strategy-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 15px 0;
+        }
+        .strategy-stat {
+            background: #0f0f1a;
+            padding: 8px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .strategy-stat-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .strategy-stat-label {
+            font-size: 10px;
+            color: #888;
+        }
+        button {
+            background: #2a2a4a;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        button:hover {
+            opacity: 0.8;
+            transform: scale(1.02);
+        }
+        .btn-toggle {
+            background: #007bff;
+            width: 100%;
+            margin-top: 10px;
+        }
+        .btn-reset {
+            background: #ff8800;
+            width: 100%;
+            margin-top: 5px;
+        }
+        .btn-danger {
+            background: #dc3545;
+            padding: 12px 24px;
+            font-size: 16px;
+        }
+        .btn-refresh {
+            background: #28a745;
+            margin-left: 10px;
+        }
+        .orders-table {
+            width: 100%;
+            background: #1a1a2e;
+            border-radius: 12px;
+            overflow-x: auto;
+        }
+        .orders-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .orders-table th, .orders-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .orders-table th {
+            background: #0f0f1a;
+            color: #888;
+            font-weight: normal;
+        }
+        .buy { color: #00ff88; }
+        .sell { color: #ff4444; }
+        .filter-bar {
+            margin: 15px 0;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-bar input, .filter-bar select {
+            background: #1a1a2e;
+            border: 1px solid #2a2a4a;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+    </style>
+    <script src="https://cdn.plot.ly/plotly-3.0.1.min.js" charset="utf-8"></script>
+</head>
+<body>
+    <div class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>🤖 Crypto Trading Bot</h1>
+            <div>
+                <button class="btn-refresh" onclick="loadAllData()">🔄 Оновити</button>
+            </div>
+        </div>
+
+        <!-- Загальна статистика -->
+        <div class="stats-grid" id="globalStats">
+            <div class="stat-card">
+                <div class="stat-value" id="totalPnl">$0</div>
+                <div class="stat-label">Загальний PnL</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="totalBalance">$0</div>
+                <div class="stat-label">Загальний баланс</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="activeStrategies">0</div>
+                <div class="stat-label">Активні стратегії</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="mode">-</div>
+                <div class="stat-label">Режим</div>
+            </div>
+        </div>
+
+        <!-- Стратегії -->
+        <h2>📈 Стратегії</h2>
+        <div class="strategies-container" id="strategiesContainer">
+            <div class="loading">Завантаження...</div>
+        </div>
+
+        <!-- Кнопки управління -->
+        <div style="margin: 20px 0; display: flex; gap: 10px;">
+            <button class="btn-danger" onclick="emergencyStop()">🛑 ЕКСТРЕНА ЗУПИНКА</button>
+            <button onclick="resetAllStrategies()" style="background: #ff8800;">🔄 Скинути всі стратегії</button>
+        </div>
+
+        <!-- Таблиця ордерів -->
+        <h2>📋 Історія ордерів</h2>
+        <div class="filter-bar">
+            <select id="orderSideFilter">
+                <option value="all">Всі сторони</option>
+                <option value="buy">Купівля</option>
+                <option value="sell">Продаж</option>
+            </select>
+            <select id="orderStatusFilter">
+                <option value="all">Всі статуси</option>
+                <option value="open">Відкриті</option>
+                <option value="closed">Закриті</option>
+            </select>
+            <input type="number" id="orderLimit" placeholder="Кількість рядків" value="20">
+            <button onclick="loadOrders()">Застосувати</button>
+        </div>
+        <div class="orders-table" id="ordersTable">
+            <div class="loading">Завантаження...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+
+        async function loadAllData() {
+            await loadStrategies();
+            await loadOrders();
+        }
+
+        async function loadStrategies() {
+            try {
+                const response = await fetch('/api/strategies');
+                const strategies = await response.json();
+
+                // Розрахунок загальної статистики
+                let totalPnl = 0;
+                let totalBalance = 0;
+                let activeCount = 0;
+
+                strategies.forEach(s => {
+                    if (s.enabled) activeCount++;
+                    totalPnl += s.total_pnl || 0;
+                    totalBalance += s.balance || 0;
+                });
+
+                document.getElementById('totalPnl').innerHTML = `$${totalPnl.toFixed(2)}`;
+                document.getElementById('totalBalance').innerHTML = `$${totalBalance.toFixed(2)}`;
+                document.getElementById('activeStrategies').innerText = activeCount;
+                document.getElementById('mode').innerText = strategies[0]?.mode || '-';
+
+                // Відображення стратегій
+                const container = document.getElementById('strategiesContainer');
+                if (strategies.length === 0) {
+                    container.innerHTML = '<div class="loading">Немає стратегій</div>';
+                    return;
+                }
+
+                container.innerHTML = strategies.map(s => `
+                    <div class="strategy-card ${s.enabled ? 'active' : 'inactive'}">
+                        <div class="strategy-header">
+                            <span class="strategy-name">${s.name.toUpperCase()}</span>
+                            <span class="strategy-status ${s.enabled ? 'status-active' : 'status-inactive'}">
+                                ${s.enabled ? '✅ Активна' : '❌ Зупинена'}
+                            </span>
+                        </div>
+                        <div class="strategy-stats">
+                            <div class="strategy-stat">
+                                <div class="strategy-stat-value">$${s.balance?.toFixed(2) || 0}</div>
+                                <div class="strategy-stat-label">Баланс</div>
+                            </div>
+                            <div class="strategy-stat">
+                                <div class="strategy-stat-value">$${s.total_pnl?.toFixed(2) || 0}</div>
+                                <div class="strategy-stat-label">PnL</div>
+                            </div>
+                            <div class="strategy-stat">
+                                <div class="strategy-stat-value">${s.active_orders || 0}</div>
+                                <div class="strategy-stat-label">Активні ордери</div>
+                            </div>
+                            <div class="strategy-stat">
+                                <div class="strategy-stat-value">${s.total_trades || 0}</div>
+                                <div class="strategy-stat-label">Всього угод</div>
+                            </div>
+                            <div class="strategy-stat">
+                                <div class="strategy-stat-value">${s.win_rate || 0}%</div>
+                                <div class="strategy-stat-label">Win Rate</div>
+                            </div>
+                            <div class="strategy-stat">
+                                <div class="strategy-stat-value">${s.symbol || '-'}</div>
+                                <div class="strategy-stat-label">Символ</div>
+                            </div>
+                        </div>
+                        <button class="btn-toggle" onclick="toggleStrategy(${s.id})">
+                            ${s.enabled ? '❌ Зупинити' : '✅ Запустити'}
+                        </button>
+                        <button class="btn-reset" onclick="resetStrategy(${s.id})">
+                            🔄 Скинути
+                        </button>
+                    </div>
+                `).join('');
+
+            } catch (e) {
+                console.error('Помилка завантаження стратегій:', e);
+                document.getElementById('strategiesContainer').innerHTML = '<div class="loading">Помилка завантаження</div>';
+            }
+        }
+
+        async function loadOrders() {
+            try {
+                const side = document.getElementById('orderSideFilter').value;
+                const status = document.getElementById('orderStatusFilter').value;
+                const limit = document.getElementById('orderLimit').value;
+
+                const response = await fetch(`/api/orders?side=${side}&status=${status}&limit=${limit}`);
+                const orders = await response.json();
+
+                const table = document.getElementById('ordersTable');
+                if (orders.length === 0) {
+                    table.innerHTML = '<div class="loading">Немає ордерів</div>';
+                    return;
+                }
+
+                table.innerHTML = `
+                    <table>
+                        <thead>
+                            <tr><th>Час</th><th>Символ</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th></tr>
+                        </thead>
+                        <tbody>
+                            ${orders.map(o => `
+                                <tr>
+                                    <td>${new Date(o.opened_at).toLocaleString()}</td>
+                                    <td>${o.symbol}</td>
+                                    <td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td>
+                                    <td>$${parseFloat(o.price).toFixed(2)}</td>
+                                    <td>${parseFloat(o.quantity).toFixed(6)}</td>
+                                    <td>${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td>
+                                    <td class="${(o.pnl || 0) >= 0 ? 'buy' : 'sell'}">$${(o.pnl || 0).toFixed(2)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+
+            } catch (e) {
+                console.error('Помилка завантаження ордерів:', e);
+                document.getElementById('ordersTable').innerHTML = '<div class="loading">Помилка завантаження</div>';
+            }
+        }
+
+        async function toggleStrategy(id) {
+            try {
+                await fetch(`/api/strategy/${id}/toggle`, { method: 'POST' });
+                await loadStrategies();
+            } catch (e) {
+                console.error('Помилка перемикання:', e);
+            }
+        }
+
+        async function resetStrategy(id) {
+            if (confirm('⚠️ Скинути стратегію? Всі дані будуть втрачені!')) {
+                try {
+                    await fetch(`/api/strategy/${id}/reset`, { method: 'POST' });
+                    await loadAllData();
+                } catch (e) {
+                    console.error('Помилка скидання:', e);
+                }
+            }
+        }
+
+        async function resetAllStrategies() {
+            if (confirm('⚠️ Скинути ВСІ стратегії? Всі дані будуть втрачені!')) {
+                try {
+                    await fetch('/api/reset_all', { method: 'POST' });
+                    await loadAllData();
+                } catch (e) {
+                    console.error('Помилка скидання:', e);
+                }
+            }
+        }
+
+        async function emergencyStop() {
+            if (confirm('⚠️ ЕКСТРЕНА ЗУПИНКА? Всі позиції будуть закриті!')) {
+                try {
+                    await fetch('/api/emergency_stop', { method: 'POST' });
+                    alert('✅ Всі стратегії зупинено');
+                    await loadAllData();
+                } catch (e) {
+                    console.error('Помилка:', e);
+                }
+            }
+        }
+
+        // Автооновлення кожні 5 секунд
+        loadAllData();
+        setInterval(loadAllData, 5000);
+    </script>
+</body>
+</html>

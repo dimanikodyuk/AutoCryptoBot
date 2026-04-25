@@ -1,0 +1,33 @@
+{
+    "grid": {
+        "symbols": [
+            "BTCUSDT",
+            "SOLUSDT"
+        ],
+        "grid_levels": 4,
+        "order_size_usdt": 20,
+        "lower_percent": 15,
+        "upper_percent": 15,
+        "enabled": true
+    },
+    "news": {
+        "symbols": [
+            "BTC",
+            "SOL"
+        ],
+        "interval_minutes": 10,
+        "sensitivity": "medium",
+        "enabled": true
+    },
+    "scalp": {
+        "symbols": [
+            "BTCUSDT",
+            "SOLUSDT"
+        ],
+        "trade_size_usdt": 20,
+        "take_profit_percent": 0.5,
+        "stop_loss_percent": 0.25,
+        "trailing_stop_percent": 0.3,
+        "enabled": true
+    }
+}
