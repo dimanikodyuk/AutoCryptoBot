@@ -564,13 +564,44 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/electricity')
     @async_route
     async def api_electricity():
-        """Отримання інформації про витрати електроенергії"""
+        """Отримання інформації про витрати електроенергії з точним розрахунком"""
         import psutil
+        import os
+        from datetime import datetime
 
-        # Raspberry Pi 4 споживає ~3-5W в середньому
-        power_watts = 4.0
-        price_per_kwh = 4.32  # грн за кВт⋅год
+        # ============= БАЗОВІ НАЛАШТУВАННЯ =============
+        # Базове споживання Raspberry Pi 4 (без навантаження)
+        BASE_POWER_WATTS = 3.5  # W (3.5W в режимі очікування)
+        MAX_POWER_WATTS = 6.5  # W (6.5W при максимальному навантаженні)
 
+        # ККД блока живлення (за замовчуванням 85%)
+        PSU_EFFICIENCY = float(os.getenv('PSU_EFFICIENCY', '0.85'))
+
+        # Втрати в USB кабелі (за замовчуванням 3%)
+        CABLE_LOSS = float(os.getenv('CABLE_LOSS', '0.03'))
+
+        # Ціна за кВт⋅год (грн)
+        PRICE_PER_KWH = float(os.getenv('ELECTRICITY_PRICE', '4.32'))
+
+        # ============= РОЗРАХУНОК ПОТОЧНОГО СПОЖИВАННЯ =============
+        # Отримуємо навантаження CPU
+        cpu_percent = psutil.cpu_percent(interval=0.5)
+        ram_percent = psutil.virtual_memory().percent
+
+        # Розраховуємо коефіцієнт навантаження
+        # CPU: 0-100% → 0.7-1.3, RAM: 0-100% → 0.9-1.1
+        cpu_factor = 0.7 + (cpu_percent / 100) * 0.6
+        ram_factor = 0.9 + (ram_percent / 100) * 0.2
+        load_factor = (cpu_factor + ram_factor) / 2  # Середнє
+
+        # Поточна потужність Raspberry Pi
+        rpi_power = BASE_POWER_WATTS + (MAX_POWER_WATTS - BASE_POWER_WATTS) * (load_factor - 0.7) / 0.6
+        rpi_power = max(BASE_POWER_WATTS, min(MAX_POWER_WATTS, rpi_power))
+
+        # Додаємо втрати блока живлення та кабелю
+        total_power = rpi_power / PSU_EFFICIENCY * (1 + CABLE_LOSS)
+
+        # ============= ЧАС РОБОТИ =============
         start_time = getattr(trading_engine, 'start_time', None)
         if not start_time:
             start_time = time.time()
@@ -578,28 +609,59 @@ def create_flask_app(config, trading_engine):
 
         uptime_seconds = int(time.time() - start_time)
         uptime_hours = uptime_seconds / 3600
+        uptime_days = uptime_hours / 24
 
-        energy_kwh = (power_watts * uptime_hours) / 1000
-        cost_uah = energy_kwh * price_per_kwh
+        # Розрахунок спожитої енергії (кВт⋅год)
+        energy_kwh = (total_power * uptime_hours) / 1000
+        cost_uah = energy_kwh * PRICE_PER_KWH
 
+        # ============= ПРОГНОЗ НА МІСЯЦЬ ТА РІК =============
         hours_per_month = 30 * 24
-        monthly_energy_kwh = (power_watts * hours_per_month) / 1000
-        monthly_cost_uah = monthly_energy_kwh * price_per_kwh
+        hours_per_year = 365 * 24
 
-        yearly_energy_kwh = monthly_energy_kwh * 12
-        yearly_cost_uah = yearly_energy_kwh * price_per_kwh
+        monthly_energy_kwh = (total_power * hours_per_month) / 1000
+        monthly_cost_uah = monthly_energy_kwh * PRICE_PER_KWH
+
+        yearly_energy_kwh = (total_power * hours_per_year) / 1000
+        yearly_cost_uah = yearly_energy_kwh * PRICE_PER_KWH
+
+        # ============= ДОДАТКОВА ІНФОРМАЦІЯ =============
+        # Середня потужність за весь час роботи
+        avg_power = (energy_kwh * 1000) / uptime_hours if uptime_hours > 0 else total_power
+
+        # Оцінка вартості за день
+        daily_cost = (total_power * 24 / 1000) * PRICE_PER_KWH
 
         return jsonify({
-            'power_watts': power_watts,
-            'price_per_kwh': price_per_kwh,
+            # Поточна інформація
+            'current_power': round(total_power, 2),
+            'rpi_power': round(rpi_power, 2),
+            'psu_efficiency': round(PSU_EFFICIENCY * 100, 1),
+            'cable_loss': round(CABLE_LOSS * 100, 1),
+            'cpu_load': round(cpu_percent, 1),
+            'ram_load': round(ram_percent, 1),
+
+            # Час роботи
             'uptime_hours': round(uptime_hours, 2),
-            'uptime_days': round(uptime_hours / 24, 2),
+            'uptime_days': round(uptime_days, 2),
+            'uptime_seconds': uptime_seconds,
+
+            # Споживання та вартість
             'energy_used_kwh': round(energy_kwh, 4),
             'cost_uah': round(cost_uah, 2),
+            'avg_power': round(avg_power, 2),
+            'daily_cost': round(daily_cost, 2),
+
+            # Прогноз
             'monthly_energy_kwh': round(monthly_energy_kwh, 2),
             'monthly_cost_uah': round(monthly_cost_uah, 2),
             'yearly_energy_kwh': round(yearly_energy_kwh, 2),
-            'yearly_cost_uah': round(yearly_cost_uah, 2)
+            'yearly_cost_uah': round(yearly_cost_uah, 2),
+
+            # Параметри (для відображення в вебі)
+            'price_per_kwh': PRICE_PER_KWH,
+            'base_power': BASE_POWER_WATTS,
+            'max_power': MAX_POWER_WATTS
         })
 
     # ============= Новинна стратегія API =============

@@ -188,15 +188,14 @@
                 <div class="stat-card"><div class="stat-value" id="diskUsage">-</div><div class="stat-label">Диск</div></div>
                 <div class="stat-card"><div class="stat-value" id="botUptime">-</div><div class="stat-label">Uptime</div></div>
             </div>
-            <div class="settings-panel">
-                <h3>⚡ Електроенергія</h3>
-                <div class="stats-grid" id="electricityStats">
-                    <div class="stat-card"><div class="stat-value" id="powerCost">-</div><div class="stat-label">Витрачено (грн)</div></div>
-                    <div class="stat-card"><div class="stat-value" id="powerEnergy">-</div><div class="stat-label">Спожито (кВт⋅год)</div></div>
-                    <div class="stat-card"><div class="stat-value" id="powerMonthly">-</div><div class="stat-label">За місяць (грн)</div></div>
-                    <div class="stat-card"><div class="stat-value" id="powerYearly">-</div><div class="stat-label">За рік (грн)</div></div>
-                </div>
-            </div>
+            <div class="stats-grid" id="electricityStats">
+    <div class="stat-card"><div class="stat-value" id="powerCost">-</div><div class="stat-label">Витрачено (грн)</div></div>
+    <div class="stat-card"><div class="stat-value" id="powerEnergy">-</div><div class="stat-label">Спожито (кВт⋅год)</div></div>
+    <div class="stat-card"><div class="stat-value" id="powerMonthly">-</div><div class="stat-label">За місяць (грн)</div></div>
+    <div class="stat-card"><div class="stat-value" id="powerYearly">-</div><div class="stat-label">За рік (грн)</div></div>
+    <div class="stat-card"><div class="stat-value" id="currentPower">-</div><div class="stat-label">Поточна потужність (W)</div></div>
+    <div class="stat-card"><div class="stat-value" id="cpuLoad">-</div><div class="stat-label">CPU</div></div>
+</div>
             <div class="settings-panel">
                 <h3>🎮 Режим роботи</h3>
                 <div class="settings-row">
@@ -1053,15 +1052,17 @@
             } catch(e) { console.error(e); }
         }
         async function loadElectricity() {
-            try {
-                const resp=await fetch('/api/electricity');
-                const data=await resp.json();
-                document.getElementById('powerCost').innerHTML=`${data.cost_uah} ₴`;
-                document.getElementById('powerEnergy').innerHTML=`${data.energy_used_kwh} кВт⋅год`;
-                document.getElementById('powerMonthly').innerHTML=`${data.monthly_cost_uah} ₴`;
-                document.getElementById('powerYearly').innerHTML=`${data.yearly_cost_uah} ₴`;
-            } catch(e) { console.error(e); }
-        }
+    try {
+        const response = await fetch('/api/electricity');
+        const data = await response.json();
+        document.getElementById('powerCost').innerHTML = `${data.cost_uah} ₴`;
+        document.getElementById('powerEnergy').innerHTML = `${data.energy_used_kwh} кВт⋅год`;
+        document.getElementById('powerMonthly').innerHTML = `${data.monthly_cost_uah} ₴`;
+        document.getElementById('powerYearly').innerHTML = `${data.yearly_cost_uah} ₴`;
+        document.getElementById('currentPower').innerHTML = `${data.current_power} W`;
+        document.getElementById('cpuLoad').innerHTML = `${data.cpu_load}%`;
+    } catch(e) { console.error(e); }
+}
 
         // ============= ACTIONS =============
         async function toggleStrategy(id) { await fetch(`/api/strategy/${id}/toggle`,{method:'POST'}); loadAllData(); loadGridStrategy(); loadScalpStrategy(); }
