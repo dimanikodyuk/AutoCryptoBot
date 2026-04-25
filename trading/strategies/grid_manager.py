@@ -303,6 +303,12 @@ class GridInstance:
         return True
 
     async def update_price(self, price: float):
+        # ДОДАТИ ЦЕ НА ПОЧАТОК METOДУ ДЛЯ ДІАГНОСТИКИ
+        logger.error(f"[ДІАГНОСТИКА] {self.symbol}: is_initialized={self.is_initialized}, "
+                     f"buy_orders={len(self.active_buy_orders)}, "
+                     f"sell_orders={len(self.active_sell_orders)}, "
+                     f"lower_price={self.lower_price}")
+
         # Додаємо ціну в історію
         self.price_history.append(price)
         if len(self.price_history) > 30:
