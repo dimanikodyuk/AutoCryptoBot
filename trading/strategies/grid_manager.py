@@ -65,6 +65,13 @@ class GridInstance:
     def available_balance(self):
         return self.balance - self.locked_balance
 
+    @property
+    def available_balance(self):
+        result = self.balance - self.locked_balance
+        logger.debug(
+            f"[{self.symbol}] available_balance: balance={self.balance}, locked={self.locked_balance}, result={result}")
+        return result
+
     def _load_history(self):
         with get_db() as conn:
             orders = conn.execute(
@@ -180,36 +187,55 @@ class GridInstance:
         logger.info(f"[{self.symbol}] Діапазон: ${self.lower_price:.2f} - ${self.upper_price:.2f}")
         logger.info(f"[{self.symbol}] Крок сітки: ${self.grid_spacing:.2f}")
 
-        current_level = int((current_price - self.lower_price) / self.grid_spacing)
-        current_level = max(0, min(current_level, self.grid_levels))
-        buy_levels_count = current_level
+        # ВИПРАВЛЕНО: розраховуємо ВСІ рівні нижче поточної ціни
+        buy_levels_count = 0
+        buy_prices = []
+
+        for i in range(self.grid_levels):
+            price = self.lower_price + i * self.grid_spacing
+            if price < current_price:
+                buy_levels_count += 1
+                buy_prices.append(price)
+            else:
+                break
+
+        logger.info(f"[{self.symbol}] Знайдено {buy_levels_count} рівнів нижче ціни:")
+        for idx, price in enumerate(buy_prices):
+            logger.info(f"[{self.symbol}]   L{idx}: ${price:.2f}")
+
+        logger.info(f"[{self.symbol}] Доступний баланс: ${self.available_balance:.2f}")
+
+        required_total = self.order_size_usdt * buy_levels_count
+        logger.info(f"[{self.symbol}] Потрібно всього: ${required_total:.2f}")
+
+        if self.available_balance < required_total:
+            logger.warning(
+                f"[{self.symbol}] Недостатньо балансу для всіх рівнів! Потрібно ${required_total:.2f}, є ${self.available_balance:.2f}")
+            # Створюємо стільки, скільки вистачає
+            buy_levels_count = int(self.available_balance / self.order_size_usdt)
+            buy_prices = buy_prices[:buy_levels_count]
+            logger.info(f"[{self.symbol}] Буде створено {buy_levels_count} рівнів")
 
         orders_created = 0
-
-        for i in range(buy_levels_count):
-            buy_price = self.lower_price + i * self.grid_spacing
+        for idx, buy_price in enumerate(buy_prices):
             quantity = self.order_size_usdt / buy_price
             cost = quantity * buy_price
 
-            if self.available_balance >= cost:
-                pair_id = self._generate_pair_id()
-                order_id = f"buy_{self.symbol}_{int(buy_price)}_{uuid.uuid4().hex[:8]}"
-                self.active_buy_orders[order_id] = {
-                    'order_id': order_id,
-                    'pair_id': pair_id,
-                    'symbol': self.symbol,
-                    'side': 'buy',
-                    'price': buy_price,
-                    'quantity': quantity,
-                    'created_at': datetime.now().isoformat()
-                }
-                self.locked_balance += cost
-                self._save_order(order_id, pair_id, 'buy', buy_price, quantity, 'open')
-                orders_created += 1
-                add_log("INFO", "grid", f"[{self.symbol}] Створено BUY @ {buy_price:.2f}")
-            else:
-                logger.warning(f"[{self.symbol}] Недостатньо балансу для BUY @ {buy_price:.2f}")
-                break
+            pair_id = self._generate_pair_id()
+            order_id = f"buy_{self.symbol}_{int(buy_price)}_{uuid.uuid4().hex[:8]}"
+            self.active_buy_orders[order_id] = {
+                'order_id': order_id,
+                'pair_id': pair_id,
+                'symbol': self.symbol,
+                'side': 'buy',
+                'price': buy_price,
+                'quantity': quantity,
+                'created_at': datetime.now().isoformat()
+            }
+            self.locked_balance += cost
+            self._save_order(order_id, pair_id, 'buy', buy_price, quantity, 'open')
+            orders_created += 1
+            logger.info(f"[{self.symbol}] ✅ Створено BUY L{idx} @ ${buy_price:.2f}")
 
         self.is_initialized = True
         self.last_rebalance_price = current_price
