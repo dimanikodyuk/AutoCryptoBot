@@ -169,7 +169,7 @@ class GridInstance:
         return adaptive_range, adaptive_range
 
     async def initialize_grid(self, current_price: float):
-        """Ініціалізація сітки з перевіркою балансу"""
+        """Ініціалізація сітки - створюємо ТІЛЬКИ BUY ордери нижче ціни"""
         if self.active_buy_orders or self.active_sell_orders:
             logger.info(f"[{self.symbol}] Вже є активні ордери, пропускаємо ініціалізацію")
             self.is_initialized = True
@@ -186,7 +186,6 @@ class GridInstance:
         atr = await self._calculate_atr()
         adaptive_lower, adaptive_upper = self._calculate_adaptive_range(current_price, atr)
 
-        # Оновлюємо відсотки (тимчасово для цієї ініціалізації)
         use_lower_percent = adaptive_lower
         use_upper_percent = adaptive_upper
 
@@ -202,14 +201,14 @@ class GridInstance:
         logger.info(
             f"[{self.symbol}] Крок сітки: ${self.grid_spacing:.2f} ({self.grid_spacing / current_price * 100:.2f}%)")
 
+        # Розраховуємо скільки BUY ордерів має бути нижче поточної ціни
         current_level = int((current_price - self.lower_price) / self.grid_spacing)
         current_level = max(0, min(current_level, self.grid_levels))
         buy_levels_count = current_level
-        sell_levels_count = self.grid_levels - current_level
 
         orders_created = 0
 
-        # Створюємо BUY ордери (нижче поточної ціни)
+        # ✅ ТІЛЬКИ BUY ордери (нижче поточної ціни)
         for i in range(buy_levels_count):
             buy_price = self.lower_price + i * self.grid_spacing
             quantity = self.order_size_usdt / buy_price
@@ -236,39 +235,11 @@ class GridInstance:
                     f"[{self.symbol}] Недостатньо доступного балансу (потрібно ${cost:.2f}, є ${self.available_balance:.2f})")
                 break
 
-        # Створюємо SELL ордери (вище поточної ціни)
-        for i in range(sell_levels_count):
-            sell_price = self.lower_price + (current_level + i + 1) * self.grid_spacing
-            quantity = self.order_size_usdt / sell_price
-            cost = quantity * sell_price
-
-            if self.available_balance >= cost:
-                pair_id = self._generate_pair_id()
-                order_id = f"sell_{self.symbol}_{int(sell_price)}_{uuid.uuid4().hex[:8]}"
-                self.active_sell_orders[order_id] = {
-                    'order_id': order_id,
-                    'pair_id': pair_id,
-                    'symbol': self.symbol,
-                    'side': 'sell',
-                    'price': sell_price,
-                    'quantity': quantity,
-                    'created_at': datetime.now().isoformat()
-                }
-                self.locked_balance += cost
-                self._save_order(order_id, pair_id, 'sell', sell_price, quantity, 'open')
-                orders_created += 1
-                add_log("INFO", "grid", f"[{self.symbol}] Створено SELL @ {sell_price:.2f} (заблоковано ${cost:.2f})")
-            else:
-                logger.warning(
-                    f"[{self.symbol}] Недостатньо доступного балансу для SELL ордера (потрібно ${cost:.2f})")
-                break
-
         self.is_initialized = True
         self.last_rebalance_price = current_price
-        logger.info(
-            f"[{self.symbol}] Створено {orders_created} ордерів (BUY: {buy_levels_count}, SELL: {sell_levels_count})")
+        logger.info(f"[{self.symbol}] Створено {orders_created} BUY ордерів з {buy_levels_count} можливих")
 
-        # Відправляємо сповіщення про успішний запуск сітки
+        # Сповіщення про успішний запуск сітки
         if self.parent_strategy and hasattr(self.parent_strategy, 'telegram_bot') and self.parent_strategy.telegram_bot:
             message = (
                 f"✅ *СІТКУ ЗАПУЩЕНО* ✅\n"
@@ -276,7 +247,8 @@ class GridInstance:
                 f"└ Ціна: `${current_price:.2f}`\n"
                 f"└ Діапазон: `${self.lower_price:.2f}` - `${self.upper_price:.2f}`\n"
                 f"└ Рівнів: {self.grid_levels}\n"
-                f"└ Ордерів створено: {orders_created}"
+                f"└ BUY ордерів створено: {orders_created}\n"
+                f"└ (SELL ордери з'являться після виконання BUY)"
             )
             await self.parent_strategy.telegram_bot.send_notification(message, parse_mode='Markdown')
 
