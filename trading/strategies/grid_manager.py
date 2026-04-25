@@ -170,10 +170,10 @@ class GridInstance:
 
     async def initialize_grid(self, current_price: float):
         # ДІАГНОСТИКА
-        logger.error(f"🔍 initialize_grid() ВИКЛИКАНО для {self.symbol}, price={current_price}")
-        logger.error(
-            f"🔍 active_buy_orders={len(self.active_buy_orders)}, active_sell_orders={len(self.active_sell_orders)}")
-        logger.error(f"🔍 available_balance={self.available_balance}, order_size_usdt={self.order_size_usdt}")
+        #logger.error(f"🔍 initialize_grid() ВИКЛИКАНО для {self.symbol}, price={current_price}")
+        #logger.error(
+        #   f"🔍 active_buy_orders={len(self.active_buy_orders)}, active_sell_orders={len(self.active_sell_orders)}")
+        #logger.error(f"🔍 available_balance={self.available_balance}, order_size_usdt={self.order_size_usdt}")
 
         if self.active_buy_orders or self.active_sell_orders:
             logger.info(f"[{self.symbol}] Вже є активні ордери, пропускаємо ініціалізацію")
@@ -543,25 +543,37 @@ class GridInstance:
         }
 
     def get_grid_levels(self, current_price: float) -> List[dict]:
+        """Повертає рівні сітки для відображення (включно з майбутніми SELL)"""
         if not self.lower_price or not self.upper_price or self.grid_spacing is None:
             return []
+
         levels = []
         for i in range(self.grid_levels + 1):
             price = self.lower_price + i * self.grid_spacing
-            base_type = 'neutral'
+
+            # Визначаємо тип рівня
             if price < current_price:
-                base_type = 'buy'
+                # Нижче поточної ціни - потенційний BUY або активний BUY
+                is_active = any(abs(order['price'] - price) < self.grid_spacing / 2
+                                for order in self.active_buy_orders.values())
+                level_type = 'active_buy' if is_active else 'buy'
             elif price > current_price:
-                base_type = 'sell'
-            is_active_buy = any(
-                abs(order['price'] - price) < self.grid_spacing / 2 for order in self.active_buy_orders.values())
-            is_active_sell = any(
-                abs(order['price'] - price) < self.grid_spacing / 2 for order in self.active_sell_orders.values())
-            if is_active_buy:
-                level_type = 'active_buy'
-            elif is_active_sell:
-                level_type = 'active_sell'
+                # Вище поточної ціни - потенційний SELL (ще не створений)
+                # Але показуємо як "очікується" або "буде створено після BUY"
+                is_active = any(abs(order['price'] - price) < self.grid_spacing / 2
+                                for order in self.active_sell_orders.values())
+                if is_active:
+                    level_type = 'active_sell'
+                else:
+                    # Це майбутній SELL, який ще не створений
+                    level_type = 'pending_sell'  # Новий тип для відображення
             else:
-                level_type = base_type
-            levels.append({'level': i, 'price': round(price, 2), 'type': level_type})
+                level_type = 'current'  # Поточна ціна
+
+            levels.append({
+                'level': i,
+                'price': round(price, 2),
+                'type': level_type
+            })
+
         return levels
