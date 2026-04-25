@@ -169,7 +169,12 @@ class GridInstance:
         return adaptive_range, adaptive_range
 
     async def initialize_grid(self, current_price: float):
-        """Ініціалізація сітки - створюємо ТІЛЬКИ BUY ордери нижче ціни"""
+        # ДІАГНОСТИКА
+        logger.error(f"🔍 initialize_grid() ВИКЛИКАНО для {self.symbol}, price={current_price}")
+        logger.error(
+            f"🔍 active_buy_orders={len(self.active_buy_orders)}, active_sell_orders={len(self.active_sell_orders)}")
+        logger.error(f"🔍 available_balance={self.available_balance}, order_size_usdt={self.order_size_usdt}")
+
         if self.active_buy_orders or self.active_sell_orders:
             logger.info(f"[{self.symbol}] Вже є активні ордери, пропускаємо ініціалізацію")
             self.is_initialized = True
@@ -177,9 +182,8 @@ class GridInstance:
 
         # Перевіряємо чи достатньо балансу
         if self.available_balance < self.order_size_usdt:
-            logger.warning(f"[{self.symbol}] Недостатньо балансу для створення сітки. "
-                           f"Доступно: ${self.available_balance:.2f}, "
-                           f"Потрібно мінімум: ${self.order_size_usdt:.2f}")
+            logger.error(
+                f"❌ НЕДОСТАТНЬО БАЛАНСУ! Доступно: ${self.available_balance:.2f}, Потрібно: ${self.order_size_usdt:.2f}")
             return
 
         # Розраховуємо адаптивний діапазон
@@ -208,6 +212,8 @@ class GridInstance:
 
         orders_created = 0
 
+
+
         # ✅ ТІЛЬКИ BUY ордери (нижче поточної ціни)
         for i in range(buy_levels_count):
             buy_price = self.lower_price + i * self.grid_spacing
@@ -230,6 +236,8 @@ class GridInstance:
                 self._save_order(order_id, pair_id, 'buy', buy_price, quantity, 'open')
                 orders_created += 1
                 add_log("INFO", "grid", f"[{self.symbol}] Створено BUY @ {buy_price:.2f} (заблоковано ${cost:.2f})")
+
+                logger.error(f"✅ initialize_grid() завершено: створено {orders_created} ордерів")
             else:
                 logger.warning(
                     f"[{self.symbol}] Недостатньо доступного балансу (потрібно ${cost:.2f}, є ${self.available_balance:.2f})")
