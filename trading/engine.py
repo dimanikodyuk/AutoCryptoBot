@@ -73,12 +73,16 @@ class TradingEngine:
         logger.info(f"Торговий двигун ініціалізовано. Знайдено {len(self.strategies)} стратегій")
 
     async def start_all_strategies(self):
-        """Запуск всіх стратегій"""
+        """Запуск всіх стратегій (активних та неактивних)"""
         for strategy in self.strategies.values():
-            if strategy.enabled:
-                await strategy.start()
-                self.active_strategies.append(strategy)
-                logger.info(f"Стратегія {strategy.name} запущена")
+            # Запускаємо ВСІ стратегії, незалежно від enabled
+            await strategy.start()
+            self.active_strategies.append(strategy)
+            strategy.enabled = True  # Встановлюємо enabled в True
+            # Оновлюємо в БД
+            with get_db() as conn:
+                conn.execute("UPDATE strategies SET enabled = 1 WHERE id = ?", (strategy.strategy_id,))
+            logger.info(f"Стратегія {strategy.name} запущена")
 
     def set_telegram_bot(self, telegram_bot):
         self.telegram_bot = telegram_bot
