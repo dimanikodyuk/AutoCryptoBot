@@ -1141,11 +1141,13 @@
                 <div class="trade-info-item"><div class="trade-info-label">Час</div><div class="trade-info-value">${new Date(timestamp).toLocaleString()}</div></div>
             `;
 
-            chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...</div>';
+            chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...<br>Спробуйте ще раз через кілька секунд</div>';
 
             try {
                 const response = await fetch(`/api/trade_chart/${orderId}`);
                 const data = await response.json();
+
+                console.log('Відповідь сервера:', data);
 
                 if (data.error) {
                     chartContainer.innerHTML = `<div class="loading-chart">❌ ${data.error}</div>`;
@@ -1153,30 +1155,25 @@
                 }
 
                 if (!data.klines || data.klines.length === 0) {
-                    chartContainer.innerHTML = '<div class="loading-chart">📭 Немає даних для цієї угоди</div>';
+                    chartContainer.innerHTML = '<div class="loading-chart">📭 Немає даних для цієї угоди.<br>Можливо, угода занадто стара або свічки не завантажились.</div>';
                     return;
                 }
 
-                // Будуємо простий лінійний графік замість свічок
+                // Будуємо простий графік
                 const timestamps = data.klines.map(k => {
                     const d = new Date(k.timestamp);
                     return d.toLocaleString();
                 });
                 const prices = data.klines.map(k => k.close);
 
-                // Лінія ціни
-                const priceTrace = {
+                const traces = [{
                     x: timestamps,
                     y: prices,
                     type: 'scatter',
                     mode: 'lines',
                     name: 'Ціна',
-                    line: { color: '#00d4ff', width: 2 },
-                    fill: 'tozeroy',
-                    fillcolor: 'rgba(0, 212, 255, 0.1)'
-                };
-
-                const traces = [priceTrace];
+                    line: { color: '#00d4ff', width: 2 }
+                }];
 
                 // Точка входу
                 const entryTime = new Date(data.entry_point.timestamp).toLocaleString();
@@ -1186,87 +1183,51 @@
                     x: [entryTime],
                     y: [entryPrice],
                     type: 'scatter',
-                    mode: 'markers+text',
-                    name: '🟢 ВХІД',
-                    marker: { color: '#00ff88', size: 16, symbol: 'circle', line: { color: 'white', width: 2 } },
-                    text: [`💰 $${entryPrice.toFixed(2)}`],
-                    textposition: 'top center',
-                    textfont: { color: '#00ff88', size: 10, weight: 'bold' }
+                    mode: 'markers',
+                    name: 'ВХІД',
+                    marker: { color: '#00ff88', size: 12, symbol: 'circle' }
                 });
 
-                // Точка виходу (якщо є)
+                // Точка виходу
                 if (data.exit_point) {
                     const exitTime = new Date(data.exit_point.timestamp).toLocaleString();
                     const exitPrice = data.exit_point.price;
-                    const pnlPercent = ((exitPrice - entryPrice) / entryPrice * 100).toFixed(2);
 
                     traces.push({
                         x: [exitTime],
                         y: [exitPrice],
                         type: 'scatter',
-                        mode: 'markers+text',
-                        name: '🔴 ВИХІД',
-                        marker: { color: '#ff4444', size: 16, symbol: 'circle', line: { color: 'white', width: 2 } },
-                        text: [`💸 $${exitPrice.toFixed(2)} (${pnlPercent}%)`],
-                        textposition: 'bottom center',
-                        textfont: { color: '#ff4444', size: 10, weight: 'bold' }
+                        mode: 'markers',
+                        name: 'ВИХІД',
+                        marker: { color: '#ff4444', size: 12, symbol: 'circle' }
                     });
 
-                    // Лінія з'єднання
                     traces.push({
                         x: [entryTime, exitTime],
                         y: [entryPrice, exitPrice],
                         type: 'scatter',
                         mode: 'lines',
-                        name: '📈 Тренд',
-                        line: { color: pnlPercent >= 0 ? '#00ff88' : '#ff4444', width: 2, dash: 'dash' }
+                        name: 'Тренд',
+                        line: { color: '#ffaa00', width: 2, dash: 'dash' }
                     });
                 }
 
-                // Знаходимо межі для масштабування
-                const allPrices = [...prices, entryPrice];
-                if (data.exit_point) allPrices.push(data.exit_point.price);
-                const minPrice = Math.min(...allPrices) * 0.998;
-                const maxPrice = Math.max(...allPrices) * 1.002;
-
                 const layout = {
-                    title: {
-                        text: `${symbol} — ${data.exit_point ? 'Закрита угода' : 'Відкрита угода'}`,
-                        font: { color: '#e0e0e0', size: 14 }
-                    },
+                    title: `${symbol} — ${data.exit_point ? 'Закрита угода' : 'Відкрита угода'}`,
                     paper_bgcolor: '#1a1a2e',
                     plot_bgcolor: '#1a1a2e',
                     font: { color: '#e0e0e0' },
-                    xaxis: {
-                        title: 'Час',
-                        gridcolor: '#2a2a4a',
-                        tickangle: -45,
-                        type: 'category'
-                    },
-                    yaxis: {
-                        title: 'Ціна (USDT)',
-                        gridcolor: '#2a2a4a',
-                        range: [minPrice, maxPrice],
-                        tickformat: '.2f'
-                    },
-                    hovermode: 'x unified',
-                    showlegend: true,
-                    legend: {
-                        x: 0.02,
-                        y: 0.98,
-                        bgcolor: 'rgba(0,0,0,0.6)',
-                        font: { color: '#e0e0e0', size: 10 }
-                    },
-                    margin: { l: 70, r: 40, t: 50, b: 100 },
+                    xaxis: { title: 'Час', tickangle: -45 },
+                    yaxis: { title: 'Ціна (USDT)' },
                     height: 450,
-                    autosize: true
+                    margin: { l: 60, r: 40, t: 50, b: 100 }
                 };
 
                 Plotly.newPlot(chartContainer, traces, layout, { responsive: true });
 
             } catch(e) {
-                console.error('Помилка завантаження графіка:', e);
-                chartContainer.innerHTML = '<div class="loading-chart">❌ Помилка завантаження графіка</div>';
+                console.error('Помилка:', e);
+                chartContainer.innerHTML = '<div class="loading-chart">❌ Помилка завантаження графіка: ' + e.message + '</div>';
             }
         }
 
