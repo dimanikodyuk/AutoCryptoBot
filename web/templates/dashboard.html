@@ -836,12 +836,12 @@
             }
         }
 
-        // ============= SCALP =============
         async function loadScalpStrategy() {
             try {
                 const response = await fetch('/api/scalp_status');
                 const data = await response.json();
                 if (data.error) { document.getElementById('scalpContent').innerHTML = `<div class="loading">${data.error}</div>`; return; }
+
                 let positionsHtml = '';
                 if (data.open_positions && Object.keys(data.open_positions).length > 0) {
                     positionsHtml = '<h3>📊 Активні позиції</h3>';
@@ -850,15 +850,65 @@
                         const pnlPercent = (currentPrice - pos.entry_price) / pos.entry_price * 100;
                         positionsHtml += `<div class="scalp-position-card"><div><strong>${symbol}</strong></div><div>Вхід: $${pos.entry_price.toFixed(2)}</div><div>Кількість: ${pos.quantity.toFixed(6)}</div><div>Поточна: $${currentPrice.toFixed(2)}</div><div class="${pnlPercent >= 0 ? 'scalp-positive' : 'scalp-negative'}">PnL: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%</div></div>`;
                     }
-                } else positionsHtml = '<div class="loading">Немає активних позицій</div>';
-                let html = `<div class="settings-panel"><h3>⚡ Налаштування Скальпінг стратегії</h3><div class="settings-row"><label>Торгові пари:</label><input type="text" id="scalpSymbols" value="${(data.symbols || ['BTCUSDT']).join(',')}" style="width: 250px;"><label>Розмір угоди (USDT):</label><input type="number" id="scalpTradeSize" value="${data.trade_size_usdt || 20}" min="5" max="100" step="5"><label>Профіт %:</label><input type="number" id="scalpTakeProfit" value="${data.take_profit_percent || 0.5}" step="0.1" min="0.1" max="2"><label>Стоп-лосс %:</label><input type="number" id="scalpStopLoss" value="${data.stop_loss_percent || 0.25}" step="0.1" min="0.1" max="1"><button class="btn-save" onclick="updateScalpSettings()">💾 Зберегти</button></div></div>
-                <div class="stats-grid"><div class="stat-card"><div class="stat-value">$${data.balance?.toFixed(2) || 0}</div><div class="stat-label">Баланс</div></div><div class="stat-card"><div class="stat-value">$${data.locked_balance?.toFixed(2) || 0}</div><div class="stat-label">Заблоковано</div></div><div class="stat-card"><div class="stat-value">$${data.available_balance?.toFixed(2) || 0}</div><div class="stat-label">Доступно</div></div><div class="stat-card"><div class="stat-value ${(data.total_pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${data.total_pnl?.toFixed(2) || 0}</div><div class="stat-label">Загальний PnL</div></div><div class="stat-card"><div class="stat-value">${data.total_trades || 0}</div><div class="stat-label">Всього угод</div></div><div class="stat-card"><div class="stat-value">${data.win_rate || 0}%</div><div class="stat-label">Win Rate</div></div></div>
-                ${positionsHtml}<h3 style="margin-top: 20px;">📋 Ордери скальпінг стратегії</h3>
-                <div class="filter-bar"><select id="scalpOrderSideFilter"><option value="all">Всі сторони</option><option value="buy">Купівля</option><option value="sell">Продаж</option></select><select id="scalpOrderStatusFilter"><option value="all">Всі статуси</option><option value="open">Відкриті</option><option value="closed">Закриті</option></select><input type="number" id="scalpOrderLimit" placeholder="Кількість" value="20"><button onclick="loadScalpOrders()">Застосувати</button></div>
+                } else {
+                    positionsHtml = '<div class="loading">Немає активних позицій</div>';
+                }
+
+                let html = `<div class="settings-panel">
+                    <h3>⚡ Налаштування Скальпінг стратегії</h3>
+                    <div class="settings-row">
+                        <label>Торгові пари:</label>
+                        <input type="text" id="scalpSymbols" value="${(data.symbols || ['BTCUSDT']).join(',')}" style="width: 250px;">
+
+                        <label>Таймфрейм:</label>
+                        <select id="scalpTimeframe">
+                            <option value="1" ${data.timeframe === '1' ? 'selected' : ''}>1 хвилина</option>
+                            <option value="5" ${data.timeframe === '5' ? 'selected' : ''}>5 хвилин</option>
+                            <option value="15" ${data.timeframe === '15' ? 'selected' : ''}>15 хвилин</option>
+                            <option value="30" ${data.timeframe === '30' ? 'selected' : ''}>30 хвилин</option>
+                            <option value="60" ${data.timeframe === '60' ? 'selected' : ''}>1 година</option>
+                        </select>
+
+                        <label>Розмір угоди (USDT):</label>
+                        <input type="number" id="scalpTradeSize" value="${data.trade_size_usdt || 20}" min="5" max="100" step="5">
+
+                        <label>Профіт %:</label>
+                        <input type="number" id="scalpTakeProfit" value="${data.take_profit_percent || 1.5}" step="0.1" min="0.1" max="3">
+
+                        <label>Стоп-лосс %:</label>
+                        <input type="number" id="scalpStopLoss" value="${data.stop_loss_percent || 0.8}" step="0.1" min="0.1" max="2">
+
+                        <button class="btn-save" onclick="updateScalpSettings()">💾 Зберегти</button>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card"><div class="stat-value">$${data.balance?.toFixed(2) || 0}</div><div class="stat-label">Баланс</div></div>
+                    <div class="stat-card"><div class="stat-value">$${data.locked_balance?.toFixed(2) || 0}</div><div class="stat-label">Заблоковано</div></div>
+                    <div class="stat-card"><div class="stat-value">$${data.available_balance?.toFixed(2) || 0}</div><div class="stat-label">Доступно</div></div>
+                    <div class="stat-card"><div class="stat-value ${(data.total_pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${data.total_pnl?.toFixed(2) || 0}</div><div class="stat-label">Загальний PnL</div></div>
+                    <div class="stat-card"><div class="stat-value">${data.total_trades || 0}</div><div class="stat-label">Всього угод</div></div>
+                    <div class="stat-card"><div class="stat-value">${data.win_rate || 0}%</div><div class="stat-label">Win Rate</div></div>
+                    <div class="stat-card"><div class="stat-value">${data.timeframe || '1'} хв</div><div class="stat-label">Таймфрейм</div></div>
+                </div>
+
+                ${positionsHtml}
+
+                <h3 style="margin-top: 20px;">📋 Ордери скальпінг стратегії</h3>
+                <div class="filter-bar">
+                    <select id="scalpOrderSideFilter"><option value="all">Всі сторони</option><option value="buy">Купівля</option><option value="sell">Продаж</option></select>
+                    <select id="scalpOrderStatusFilter"><option value="all">Всі статуси</option><option value="open">Відкриті</option><option value="closed">Закриті</option></select>
+                    <input type="number" id="scalpOrderLimit" placeholder="Кількість" value="20">
+                    <button onclick="loadScalpOrders()">Застосувати</button>
+                </div>
                 <div class="orders-table" id="scalpOrdersTable"><div class="loading">Завантаження ордерів...</div></div>`;
+
                 document.getElementById('scalpContent').innerHTML = html;
                 loadScalpOrders();
-            } catch(e) { console.error(e); document.getElementById('scalpContent').innerHTML = '<div class="loading">Помилка завантаження</div>'; }
+            } catch(e) {
+                console.error(e);
+                document.getElementById('scalpContent').innerHTML = '<div class="loading">Помилка завантаження</div>';
+            }
         }
 
         async function loadScalpOrders() {
@@ -870,27 +920,94 @@
                 const orders = await response.json();
                 const table = document.getElementById('scalpOrdersTable');
                 if (!table) return;
-                if (orders.length === 0) { table.innerHTML = '<div class="loading">Немає ордерів</div>'; return; }
-                let html = `<table><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th></tr></thead><tbody>`;
-                for (const o of orders) {
-                    html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${o.pnl || 0}, '${o.opened_at}')" style="cursor:pointer;">`;
-                    html += `<td>${new Date(o.opened_at).toLocaleString()}</td><td>${o.symbol}</td><td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td><td>$${parseFloat(o.price).toFixed(2)}</td><td>${parseFloat(o.quantity).toFixed(6)}</td><td>${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td><td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td></tr>`;
+                if (orders.length === 0) {
+                    table.innerHTML = '<div class="loading">Немає ордерів</div>';
+                    return;
                 }
-                html += `</tbody></table>`;
+
+                let html = `<table>
+                    <thead>
+                        <tr>
+                            <th>Час</th>
+                            <th>Пара</th>
+                            <th>Сторона</th>
+                            <th>Ціна</th>
+                            <th>Кількість</th>
+                            <th>Статус</th>
+                            <th>PnL</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+                for (const o of orders) {
+                    const pnlValue = parseFloat(o.pnl || 0);
+                    html += `<tr>`;
+                    html += `<td onclick="event.stopPropagation()">${new Date(o.opened_at).toLocaleString()}</td>`;
+                    html += `<td onclick="event.stopPropagation()">${o.symbol}</td>`;
+                    html += `<td class="${o.side}" onclick="event.stopPropagation()">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td>`;
+                    html += `<td onclick="event.stopPropagation()">$${parseFloat(o.price).toFixed(2)}</td>`;
+                    html += `<td onclick="event.stopPropagation()">${parseFloat(o.quantity).toFixed(6)}</td>`;
+                    html += `<td onclick="event.stopPropagation()">${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td>`;
+                    html += `<td class="${pnlValue >= 0 ? 'stat-positive' : 'stat-negative'}" onclick="event.stopPropagation()">$${pnlValue.toFixed(2)}</td>`;
+                    html += `</tr>`;
+                }
+
+                html += `</tbody>
+                </table>`;
                 table.innerHTML = html;
-            } catch(e) { console.error(e); }
+
+                // Додаємо обробник кліку на весь рядок після вставки HTML
+                const rows = table.querySelectorAll('tbody tr');
+                rows.forEach(row => {
+                    row.style.cursor = 'pointer';
+                    row.addEventListener('click', function(e) {
+                        if (e.target.tagName === 'TD') {
+                            const orderId = this.cells[0].getAttribute('data-order-id') ||
+                                           this.querySelector('td:first-child')?.innerText;
+                            // Знаходимо ордер в даних
+                            const order = orders.find(o => new Date(o.opened_at).toLocaleString() === this.cells[0].innerText);
+                            if (order) {
+                                showTradeChart(order.order_id, order.symbol, order.side, order.price, order.quantity, order.pnl || 0, order.opened_at);
+                            }
+                        }
+                    });
+                });
+
+            } catch(e) {
+                console.error(e);
+            }
         }
 
         async function updateScalpSettings() {
             const symbols = document.getElementById('scalpSymbols').value.split(',').map(s => s.trim().toUpperCase());
+            const timeframe = document.getElementById('scalpTimeframe').value;
             const tradeSize = parseFloat(document.getElementById('scalpTradeSize').value);
             const takeProfit = parseFloat(document.getElementById('scalpTakeProfit').value);
             const stopLoss = parseFloat(document.getElementById('scalpStopLoss').value);
+
             try {
-                await fetch('/api/scalp_settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbols: symbols, trade_size_usdt: tradeSize, take_profit_percent: takeProfit, stop_loss_percent: stopLoss }) });
-                alert('Налаштування збережено!');
-                loadScalpStrategy();
-            } catch(e) { console.error(e); }
+                const response = await fetch('/api/scalp_settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        symbols: symbols,
+                        timeframe: timeframe,
+                        trade_size_usdt: tradeSize,
+                        take_profit_percent: takeProfit,
+                        stop_loss_percent: stopLoss
+                    })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert('✅ Налаштування збережено! Перезапустіть стратегію для застосування.');
+                    loadScalpStrategy();
+                } else {
+                    alert('❌ Помилка: ' + (result.error || 'невідома'));
+                }
+            } catch(e) {
+                console.error(e);
+                alert('❌ Помилка збереження: ' + e.message);
+            }
         }
 
         // ============= NEWS =============
@@ -1135,19 +1252,19 @@
                 <div class="trade-info-item"><div class="trade-info-label">Ордер ID</div><div class="trade-info-value" style="font-size:12px;">${orderId.substring(0, 20)}...</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">Символ</div><div class="trade-info-value">${symbol}</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">Сторона</div><div class="trade-info-value ${side}">${side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</div></div>
-                <div class="trade-info-item"><div class="trade-info-label">Ціна</div><div class="trade-info-value">$${parseFloat(price).toFixed(2)}</div></div>
+                <div class="trade-info-item"><div class="trade-info-label">Ціна входу</div><div class="trade-info-value">$${parseFloat(price).toFixed(2)}</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">Кількість</div><div class="trade-info-value">${parseFloat(quantity).toFixed(6)}</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">PnL</div><div class="trade-info-value ${pnl >= 0 ? 'buy' : 'sell'}">$${parseFloat(pnl || 0).toFixed(2)}</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">Час</div><div class="trade-info-value">${new Date(timestamp).toLocaleString()}</div></div>
             `;
 
-            chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...<br>Спробуйте ще раз через кілька секунд</div>';
+            chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...</div>';
 
             try {
                 const response = await fetch(`/api/trade_chart/${orderId}`);
                 const data = await response.json();
 
-                console.log('Відповідь сервера:', data);
+                console.log('Дані графіка:', data);
 
                 if (data.error) {
                     chartContainer.innerHTML = `<div class="loading-chart">❌ ${data.error}</div>`;
@@ -1155,15 +1272,12 @@
                 }
 
                 if (!data.klines || data.klines.length === 0) {
-                    chartContainer.innerHTML = '<div class="loading-chart">📭 Немає даних для цієї угоди.<br>Можливо, угода занадто стара або свічки не завантажились.</div>';
+                    chartContainer.innerHTML = '<div class="loading-chart">📭 Немає даних свічок для цієї угоди</div>';
                     return;
                 }
 
-                // Будуємо простий графік
-                const timestamps = data.klines.map(k => {
-                    const d = new Date(k.timestamp);
-                    return d.toLocaleString();
-                });
+                // Лінія ціни
+                const timestamps = data.klines.map(k => new Date(k.timestamp).toLocaleString());
                 const prices = data.klines.map(k => k.close);
 
                 const traces = [{
@@ -1184,22 +1298,23 @@
                     y: [entryPrice],
                     type: 'scatter',
                     mode: 'markers',
-                    name: 'ВХІД',
-                    marker: { color: '#00ff88', size: 12, symbol: 'circle' }
+                    name: '🟢 ВХІД',
+                    marker: { color: '#00ff88', size: 14, symbol: 'circle' }
                 });
 
-                // Точка виходу
+                // Точка виходу (якщо є)
                 if (data.exit_point) {
                     const exitTime = new Date(data.exit_point.timestamp).toLocaleString();
                     const exitPrice = data.exit_point.price;
+                    const pnlPercent = ((exitPrice - entryPrice) / entryPrice * 100).toFixed(2);
 
                     traces.push({
                         x: [exitTime],
                         y: [exitPrice],
                         type: 'scatter',
                         mode: 'markers',
-                        name: 'ВИХІД',
-                        marker: { color: '#ff4444', size: 12, symbol: 'circle' }
+                        name: '🔴 ВИХІД',
+                        marker: { color: '#ff4444', size: 14, symbol: 'circle' }
                     });
 
                     traces.push({
@@ -1207,8 +1322,19 @@
                         y: [entryPrice, exitPrice],
                         type: 'scatter',
                         mode: 'lines',
-                        name: 'Тренд',
+                        name: '📈 Тренд',
                         line: { color: '#ffaa00', width: 2, dash: 'dash' }
+                    });
+
+                    // Додаємо текст з PnL на графік
+                    traces.push({
+                        x: [(new Date((new Date(entryTime).getTime() + new Date(exitTime).getTime()) / 2)).toLocaleString()],
+                        y: [(entryPrice + exitPrice) / 2],
+                        type: 'scatter',
+                        mode: 'text',
+                        name: 'PnL',
+                        text: [`${pnlPercent >= 0 ? '✅' : '❌'} ${pnlPercent}%`],
+                        textfont: { color: pnlPercent >= 0 ? '#00ff88' : '#ff4444', size: 12 }
                     });
                 }
 
@@ -1217,8 +1343,8 @@
                     paper_bgcolor: '#1a1a2e',
                     plot_bgcolor: '#1a1a2e',
                     font: { color: '#e0e0e0' },
-                    xaxis: { title: 'Час', tickangle: -45 },
-                    yaxis: { title: 'Ціна (USDT)' },
+                    xaxis: { title: 'Час', tickangle: -45, gridcolor: '#2a2a4a' },
+                    yaxis: { title: 'Ціна (USDT)', gridcolor: '#2a2a4a' },
                     height: 450,
                     margin: { l: 60, r: 40, t: 50, b: 100 }
                 };
@@ -1227,20 +1353,8 @@
 
             } catch(e) {
                 console.error('Помилка:', e);
-                chartContainer.innerHTML = '<div class="loading-chart">❌ Помилка завантаження графіка: ' + e.message + '</div>';
+                chartContainer.innerHTML = '<div class="loading-chart">❌ Помилка завантаження графіка</div>';
             }
-        }
-
-        function closeTradeModal() {
-            const modal = document.getElementById('tradeModal');
-            if (modal) modal.style.display = 'none';
-            const chartContainer = document.getElementById('tradeChartContainer');
-            if (chartContainer) chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...</div>';
-        }
-
-        window.onclick = function(event) {
-            const modal = document.getElementById('tradeModal');
-            if (event.target === modal) closeTradeModal();
         }
 
         function closeTradeModal() {

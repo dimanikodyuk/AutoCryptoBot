@@ -62,6 +62,9 @@ class ScalpStrategy(BaseStrategy):
         self.max_5min_gain = 3.0  # Не купуємо якщо зросло більше ніж на 3% за 5 хвилин
         self.max_atr_percent = 2.0  # Не купуємо якщо волатильність >2%
 
+        # Timeframe
+        self.timeframe = saved_settings.get('timeframe', '1')
+
         # Поточні позиції
         self.open_positions: Dict[str, dict] = {}
         self.current_prices: Dict[str, float] = {}
@@ -315,7 +318,7 @@ class ScalpStrategy(BaseStrategy):
 
     async def get_indicators(self, symbol: str) -> dict:
         try:
-            klines = await self.exchange.get_klines(symbol, interval='1', limit=100)
+            klines = await self.exchange.get_klines(symbol, interval=self.timeframe, limit=100)
             if not klines or len(klines) < 50:
                 return None
 
@@ -336,6 +339,9 @@ class ScalpStrategy(BaseStrategy):
 
             # StochRSI
             stoch_rsi = await self.calculate_stoch_rsi(closes)
+
+            # Timeframe
+
 
             current_price = closes[-1]
             self.current_prices[symbol] = current_price
@@ -567,7 +573,7 @@ class ScalpStrategy(BaseStrategy):
 
     async def update_settings(self, symbols=None, trade_size_usdt=None,
                               take_profit_percent=None, stop_loss_percent=None,
-                              trailing_stop_percent=None):
+                              trailing_stop_percent=None, timeframe=None):
         if symbols is not None:
             self.symbols = symbols
         if trade_size_usdt is not None:
@@ -578,16 +584,19 @@ class ScalpStrategy(BaseStrategy):
             self.stop_loss_percent = stop_loss_percent
         if trailing_stop_percent is not None:
             self.trailing_stop_percent = trailing_stop_percent
+        if timeframe is not None:
+            self.timeframe = timeframe
 
         save_strategy_settings('scalp',
                                symbols=self.symbols,
                                trade_size_usdt=self.trade_size_usdt,
                                take_profit_percent=self.take_profit_percent,
                                stop_loss_percent=self.stop_loss_percent,
-                               trailing_stop_percent=self.trailing_stop_percent
+                               trailing_stop_percent=self.trailing_stop_percent,
+                               timeframe=self.timeframe
                                )
 
-        add_log("INFO", self.name, f"Оновлено налаштування: {self.symbols}, розмір=${self.trade_size_usdt}")
+        add_log("INFO", self.name, f"Оновлено налаштування: {self.symbols}, розмір=${self.trade_size_usdt}, таймфрейм={self.timeframe}мін")
         return True
 
     async def _open_position(self, symbol: str, price: float, strong: bool = False):
@@ -726,7 +735,8 @@ class ScalpStrategy(BaseStrategy):
             'daily_trades_count': self.daily_trades_count,
             'max_daily_trades': self.max_daily_trades,
             'is_blocked': self._is_blocked,
-            'block_reason': self._block_reason
+            'block_reason': self._block_reason,
+            'timeframe': self.timeframe
         }
 
     async def reset(self):

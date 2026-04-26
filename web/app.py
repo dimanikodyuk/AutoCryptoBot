@@ -166,35 +166,33 @@ def create_flask_app(config, trading_engine):
                 strategy_name = order_dict.get('strategy_name', 'unknown')
 
                 logger.info(
-                    f"Знайдено ордер: strategy={strategy_name}, side={order_dict['side']}, status={order_dict['status']}")
+                    f"Знайдено ордер: strategy={strategy_name}, side={order_dict['side']}, status={order_dict['status']}, closed_price={order_dict.get('closed_price')}")
 
-                pair_order = None
                 entry_point = None
                 exit_point = None
 
-                # Для скальпінгу - це одиночний ордер, точка виходу - це закриття цього ж ордера
                 if strategy_name == 'scalp':
+                    # Точка входу - завжди ціна відкриття
                     entry_point = {
                         'price': order_dict['price'],
                         'timestamp': order_dict['opened_at'],
                         'quantity': order_dict['quantity']
                     }
 
-                    # Если ордер закрыт - точка выхода это закрытие
-                    if order_dict['status'] == 'closed' and order_dict.get('closed_at'):
+                    # Точка виходу - ціна закриття, якщо ордер закритий
+                    if order_dict['status'] == 'closed' and order_dict.get('closed_price'):
                         exit_point = {
-                            'price': order_dict['price'],  # Цена закрытия та же, что и цена открытия? НЕТ!
-                            # В скальпинге цена закрытия - это рыночная цена в момент закрытия
-                            # Нужно хранить цену закрытия в отдельном поле
+                            'price': order_dict['closed_price'],
                             'timestamp': order_dict['closed_at'],
                             'quantity': order_dict['quantity']
                         }
-                        logger.info(f"Скальпінг: угода закрита в {exit_point['timestamp']}")
+                        logger.info(f"Скальпінг: знайдено вихід price={exit_point['price']}")
                     else:
-                        logger.info(f"Скальпінг: угода ще відкрита")
+                        logger.info(f"Скальпінг: угода ще відкрита, виходу немає")
 
                 else:
-                    # Для Grid - ищем парный ордер
+                    # Для Grid - шукаємо парний ордер
+                    pair_order = None
                     if order_dict.get('pair_id'):
                         cursor = conn.execute(
                             "SELECT * FROM orders WHERE pair_id = ? AND order_id != ?",
@@ -231,29 +229,28 @@ def create_flask_app(config, trading_engine):
 
                 symbol = order_dict['symbol']
 
-                # Получаем свечи
+                # Отримуємо свічки
                 from datetime import datetime
                 entry_dt = datetime.fromisoformat(entry_point['timestamp'])
-                start_ts = int(entry_dt.timestamp() * 1000) - 3600000
+                start_ts = int(entry_dt.timestamp() * 1000) - 3600000  # 1 година до входу
 
                 if exit_point:
                     exit_dt = datetime.fromisoformat(exit_point['timestamp'])
-                    end_ts = int(exit_dt.timestamp() * 1000) + 3600000
+                    end_ts = int(exit_dt.timestamp() * 1000) + 3600000  # 1 година після виходу
                 else:
                     end_ts = start_ts + (4 * 3600000)
 
-                klines = await trading_engine.exchange.get_klines(symbol, '1', limit=300)
+                klines = await trading_engine.exchange.get_klines(symbol, '1', limit=500)
 
                 filtered_klines = []
                 for k in klines:
                     if start_ts <= k['timestamp'] <= end_ts:
                         filtered_klines.append(k)
 
-                logger.info(f"Для угоди {order_id}: свічок={len(filtered_klines)}")
+                logger.info(f"Для угоди {order_id}: свічок={len(filtered_klines)}, exit={exit_point is not None}")
 
                 return jsonify({
                     'order': order_dict,
-                    'pair_order': pair_order,
                     'entry_point': entry_point,
                     'exit_point': exit_point,
                     'klines': filtered_klines,
@@ -585,6 +582,7 @@ def create_flask_app(config, trading_engine):
             if strategy.name == 'scalp' and hasattr(strategy, 'update_settings'):
                 await strategy.update_settings(
                     symbols=data.get('symbols'),
+                    timeframe=data.get('timeframe'),  # ← ДОДАТИ
                     trade_size_usdt=data.get('trade_size_usdt'),
                     take_profit_percent=data.get('take_profit_percent'),
                     stop_loss_percent=data.get('stop_loss_percent'),

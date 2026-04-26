@@ -24,6 +24,7 @@ DEFAULT_SETTINGS = {
         "take_profit_percent": 0.5,
         "stop_loss_percent": 0.25,
         "trailing_stop_percent": 0.3,
+        "timeframe": "1",
         "enabled": False
     }
 }
