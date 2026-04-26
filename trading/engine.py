@@ -43,9 +43,15 @@ class TradingEngine:
                         mode=self.config.DEFAULT_MODE,
                         exchange=self.exchange
                     )
+                    # Встановлюємо ліміти
+                    strategy.max_daily_drawdown = self.config.MAX_DAILY_DRAWDOWN
+                    strategy.max_daily_trades = self.config.MAX_DAILY_TRADES
+                    strategy.min_balance_for_trading = self.config.MIN_BALANCE_FOR_TRADING
+
                     strategy.enabled = bool(s['enabled'])
                     self.strategies[s['id']] = strategy
                     logger.info(f"Завантажено Grid стратегію (id={s['id']}, enabled={strategy.enabled})")
+
                 elif s['name'] == 'news':
                     strategy = NewsStrategy(
                         strategy_id=s['id'],
@@ -53,9 +59,15 @@ class TradingEngine:
                         mode=self.config.DEFAULT_MODE,
                         exchange=self.exchange
                     )
+                    # Встановлюємо ліміти
+                    strategy.max_daily_drawdown = self.config.MAX_DAILY_DRAWDOWN
+                    strategy.max_daily_trades = self.config.MAX_DAILY_TRADES
+                    strategy.min_balance_for_trading = self.config.MIN_BALANCE_FOR_TRADING
+
                     strategy.enabled = bool(s['enabled'])
                     self.strategies[s['id']] = strategy
                     logger.info(f"Завантажено News стратегію (id={s['id']}, enabled={strategy.enabled})")
+
                 elif s['name'] == 'scalp':
                     strategy = ScalpStrategy(
                         strategy_id=s['id'],
@@ -63,6 +75,11 @@ class TradingEngine:
                         mode=self.config.DEFAULT_MODE,
                         exchange=self.exchange
                     )
+                    # Встановлюємо ліміти
+                    strategy.max_daily_drawdown = self.config.MAX_DAILY_DRAWDOWN
+                    strategy.max_daily_trades = self.config.MAX_DAILY_TRADES
+                    strategy.min_balance_for_trading = self.config.MIN_BALANCE_FOR_TRADING
+
                     strategy.enabled = bool(s['enabled'])
                     self.strategies[s['id']] = strategy
                     logger.info(f"Завантажено Scalp стратегію (id={s['id']}, enabled={strategy.enabled})")
@@ -142,8 +159,10 @@ class TradingEngine:
         """Завершення роботи"""
         logger.info("Завершення роботи торгового двигуна...")
         await self.emergency_stop_all()
+        await self.exchange.stop_websocket()  # Закриваємо WebSocket з'єднання
 
-    async def get_orders(self, side: str = 'all', status: str = 'all', limit: int = 50, strategy_name: str = None) -> List[dict]:
+    async def get_orders(self, side: str = 'all', status: str = 'all', limit: int = 50, strategy_name: str = None) -> \
+    List[dict]:
         """Отримання ордерів з фільтрами"""
         with get_db() as conn:
             query = """

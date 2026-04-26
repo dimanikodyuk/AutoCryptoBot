@@ -29,6 +29,7 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("emergency", self.emergency_command))
         self.application.add_handler(CommandHandler("stop_bot", self.stop_bot_command))
         self.application.add_handler(CommandHandler("report", self.daily_report_command))
+        self.application.add_handler(CommandHandler("help", self.help_command))
 
         await self.application.initialize()
         await self.application.start()
@@ -41,44 +42,65 @@ class TelegramBot:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.chat_id = update.effective_chat.id
         await update.message.reply_text(
-            "🤖 *Crypto Trading Bot*\n\n"
+            "🤖 Crypto Trading Bot\n\n"
             "Доступні команди:\n"
             "/status - поточний стан\n"
             "/strategies - список стратегій\n"
             "/report - денний звіт\n"
             "/emergency - ЕКСТРЕНА ЗУПИНКА\n"
-            "/stop_bot - зупинити бота\n\n"
-            f"Режим: {self.config.DEFAULT_MODE}",
-            parse_mode='Markdown'
+            "/stop_bot - зупинити бота\n"
+            "/help - допомога\n\n"
+            f"Режим: {self.config.DEFAULT_MODE}"
         )
         await self.send_notification(f"👤 Новий користувач підключився: {update.effective_user.username}")
 
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text(
+            "🤖 Crypto Trading Bot - Допомога\n\n"
+            "📊 Команди:\n"
+            "/status - показати поточний стан бота\n"
+            "/strategies - список стратегій та їх статус\n"
+            "/report - денний звіт по PnL\n"
+            "/emergency - ЕКСТРЕНА ЗУПИНКА всіх стратегій\n"
+            "/stop_bot - повна зупинка бота\n"
+            "/help - ця довідка\n\n"
+            "📈 Стратегії:\n"
+            "- Grid: сіткова торгівля\n"
+            "- Scalp: скальпінг з MACD/RSI/StochRSI\n"
+            "- News: торгівля за новинами\n\n"
+            f"⚙️ Поточний режим: {self.config.DEFAULT_MODE}"
+        )
+
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         summary = await self.trading_engine.get_summary()
-        message = f"📊 *Стан бота*\n"
-        message += f"Режим: {self.config.DEFAULT_MODE}\n"
-        message += f"Активних стратегій: {summary['active_strategies']}\n"
-        message += f"Загальний PnL: ${summary['total_pnl']:.2f}\n\n"
+        message = f"📊 Стан бота\n"
+        message += f"🎮 Режим: {self.config.DEFAULT_MODE}\n"
+        message += f"📈 Активних стратегій: {summary['active_strategies']}\n"
+        message += f"💰 Загальний PnL: ${summary['total_pnl']:.2f}\n"
+        message += f"💵 Загальний баланс: ${summary['total_balance']:.2f}\n\n"
+        message += f"┌ Деталі по стратегіях:\n"
         for s in summary['strategies']:
-            status = "✅" if s['enabled'] else "❌"
-            message += f"{status} *{s['name'].upper()}*: PnL ${s.get('total_pnl', 0):.2f}\n"
-        await update.message.reply_text(message, parse_mode='Markdown')
+            status_icon = "🟢" if s['enabled'] else "🔴"
+            pnl_icon = "📈" if s.get('total_pnl', 0) >= 0 else "📉"
+            message += f"├ {status_icon} {s['name'].upper()}: {pnl_icon} ${s.get('total_pnl', 0):.2f}\n"
+        await update.message.reply_text(message)
 
     async def strategies_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        message = "📈 *Стратегії*\n\n"
+        message = "📈 Стратегії\n\n"
         for strategy in self.trading_engine.strategies.values():
             status = await strategy.get_status()
             status_icon = "✅ Активна" if status['enabled'] else "❌ Зупинена"
-            message += f"• *{status['name']}*: {status_icon}\n"
+            message += f"• {status['name'].upper()}: {status_icon}\n"
+            message += f"  └ PnL: ${status.get('total_pnl', 0):.2f} | Угоди: {status.get('total_trades', 0)}\n"
         message += "\nДля керування використовуй веб-інтерфейс"
-        await update.message.reply_text(message, parse_mode='Markdown')
+        await update.message.reply_text(message)
 
     async def daily_report_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self.send_daily_report()
 
     async def emergency_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning(f"Отримано команду /emergency від {update.effective_user.username}")
-        await update.message.reply_text("🛑 *ЕКСТРЕНА ЗУПИНКА* 🛑\nЗакриваю всі позиції...", parse_mode='Markdown')
+        await update.message.reply_text("🛑 ЕКСТРЕНА ЗУПИНКА 🛑\nЗакриваю всі позиції...")
         await self.trading_engine.emergency_stop_all()
         await update.message.reply_text("✅ Всі стратегії зупинено")
 
@@ -105,62 +127,41 @@ class TelegramBot:
         if side == 'buy':
             icon = "📈"
             action = "ВІДКРИТО ПОЗИЦІЮ"
-            color = "🟢"
         else:
             icon = "📉"
             action = "ЗАКРИТО ПОЗИЦІЮ"
-            color = "🔴"
 
-        message = f"{icon} *{action}*\n"
-        message += f"Стратегія: `{strategy}`\n"
-        message += f"Пара: `{symbol}`\n"
-        message += f"Ціна: `${price:.2f}`\n"
-        message += f"Кількість: `{quantity:.6f}`\n"
+        message = f"{icon} {action}\n"
+        message += f"Стратегія: {strategy}\n"
+        message += f"Пара: {symbol}\n"
+        message += f"Ціна: ${price:.2f}\n"
+        message += f"Кількість: {quantity:.6f}\n"
 
         if pnl is not None:
             pnl_icon = "✅" if pnl >= 0 else "❌"
-            message += f"PnL: {pnl_icon} `${pnl:.2f}`\n"
+            message += f"PnL: {pnl_icon} ${pnl:.2f}\n"
 
         message += f"\n⏰ {datetime.now().strftime('%H:%M:%S')}"
-        await self.send_notification(message, parse_mode='Markdown')
+        await self.send_notification(message)
 
     async def send_daily_report(self):
         summary = await self.trading_engine.get_summary()
 
-        message = f"📊 *ДЕННИЙ ЗВІТ*\n"
+        message = f"📊 ДЕННИЙ ЗВІТ\n"
         message += f"📅 {datetime.now().strftime('%d.%m.%Y')}\n\n"
-        message += f"💰 Загальний PnL: `${summary['total_pnl']:.2f}`\n\n"
+        message += f"💰 Загальний PnL: ${summary['total_pnl']:.2f}\n\n"
 
         for s in summary['strategies']:
             status = "✅" if s['enabled'] else "❌"
-            message += f"{status} *{s['name'].upper()}*\n"
-            message += f"   Баланс: `${s.get('balance', 0):.2f}`\n"
-            message += f"   PnL: `${s.get('total_pnl', 0):.2f}`\n"
-            message += f"   Угод: `{s.get('total_trades', 0)}`\n\n"
+            message += f"{status} {s['name'].upper()}\n"
+            message += f"   └ Баланс: ${s.get('balance', 0):.2f} | PnL: ${s.get('total_pnl', 0):.2f} | Угоди: {s.get('total_trades', 0)}\n"
 
-        await self.send_notification(message, parse_mode='Markdown')
-
-    async def send_drawdown_warning(self, strategy: str, drawdown: float, limit: float):
-        message = f"⚠️ *УВАГА! DRAWDOWN* ⚠️\n"
-        message += f"Стратегія: `{strategy}`\n"
-        message += f"Поточний drawdown: `{drawdown:.2f}%`\n"
-        message += f"Ліміт: `{limit:.2f}%`\n\n"
-        message += f"Рекомендується перевірити налаштування!"
-        await self.send_notification(message, parse_mode='Markdown')
-
-    async def send_mode_change(self, old_mode: str, new_mode: str):
-        if new_mode == 'real':
-            message = f"🔴 *ЗМІНА РЕЖИМУ* 🔴\n"
-            message += f"`{old_mode}` ➡️ `{new_mode}`\n\n"
-            message += f"⚠️ **УВАГА!** Використовуються РЕАЛЬНІ кошти!"
-        else:
-            message = f"🟡 *ЗМІНА РЕЖИМУ*\n`{old_mode}` ➡️ `{new_mode}`"
-        await self.send_notification(message, parse_mode='Markdown')
+        await self.send_notification(message)
 
     async def send_strategy_status(self, strategy: str, enabled: bool):
         icon = "✅" if enabled else "❌"
         action = "запущено" if enabled else "зупинено"
-        await self.send_notification(f"{icon} Стратегія *{strategy}* {action}", parse_mode='Markdown')
+        await self.send_notification(f"{icon} Стратегія {strategy} {action}")
 
     async def shutdown(self):
         self._running = False

@@ -3,6 +3,7 @@ import uuid
 import numpy as np
 from datetime import datetime
 from typing import Dict, List
+
 from utils.logger_utils import setup_logger
 from database.db import get_db, add_log
 
@@ -60,10 +61,6 @@ class GridInstance:
     def balance(self, value):
         if self.parent_strategy:
             self.parent_strategy.total_balance = value
-
-    @property
-    def available_balance(self):
-        return self.balance - self.locked_balance
 
     @property
     def available_balance(self):
@@ -187,7 +184,6 @@ class GridInstance:
         logger.info(f"[{self.symbol}] Діапазон: ${self.lower_price:.2f} - ${self.upper_price:.2f}")
         logger.info(f"[{self.symbol}] Крок сітки: ${self.grid_spacing:.2f}")
 
-        # ВИПРАВЛЕНО: розраховуємо ВСІ рівні нижче поточної ціни
         buy_levels_count = 0
         buy_prices = []
 
@@ -211,7 +207,6 @@ class GridInstance:
         if self.available_balance < required_total:
             logger.warning(
                 f"[{self.symbol}] Недостатньо балансу для всіх рівнів! Потрібно ${required_total:.2f}, є ${self.available_balance:.2f}")
-            # Створюємо стільки, скільки вистачає
             buy_levels_count = int(self.available_balance / self.order_size_usdt)
             buy_prices = buy_prices[:buy_levels_count]
             logger.info(f"[{self.symbol}] Буде створено {buy_levels_count} рівнів")
@@ -271,7 +266,6 @@ class GridInstance:
         old_price = self.current_price
         self.current_price = price
 
-        # Ініціалізація при першому запуску
         if not self.is_initialized and not self.active_buy_orders and not self.active_sell_orders:
             await self.initialize_grid(price)
             return
@@ -332,9 +326,14 @@ class GridInstance:
             await self.parent_strategy.telegram_bot.send_notification(message, parse_mode='Markdown')
 
     async def _on_buy_filled(self, order_id: str, buy_order: dict, current_price: float):
+        """Обробка виконання BUY ордера - створення SELL ордера"""
         sell_price = buy_order['price'] + self.grid_spacing
+
         if sell_price > self.upper_price:
             self.locked_balance -= buy_order['quantity'] * buy_order['price']
+            if self.parent_strategy:
+                self.parent_strategy.increment_daily_trades()
+                self.parent_strategy.update_balance_for_drawdown()
             del self.active_buy_orders[order_id]
             return
 
@@ -343,9 +342,12 @@ class GridInstance:
         self.locked_balance -= cost
         self.balance -= cost
 
+        # ВАЖЛИВО: використовуємо той самий pair_id
+        pair_id = buy_order['pair_id']
+
         self.active_sell_orders[sell_order_id] = {
             'order_id': sell_order_id,
-            'pair_id': buy_order['pair_id'],
+            'pair_id': pair_id,  # ОДНАКОВИЙ ДЛЯ BUY ТА SELL
             'symbol': self.symbol,
             'side': 'sell',
             'price': sell_price,
@@ -353,10 +355,11 @@ class GridInstance:
             'buy_order_id': order_id,
             'created_at': datetime.now().isoformat()
         }
-        self._save_order(sell_order_id, buy_order['pair_id'], 'sell', sell_price, buy_order['quantity'], 'open')
+        self._save_order(sell_order_id, pair_id, 'sell', sell_price, buy_order['quantity'], 'open')
         del self.active_buy_orders[order_id]
+
         add_log("INFO", "grid",
-                f"[{self.symbol}] BUY виконано @ {buy_order['price']:.2f}, створено SELL @ {sell_price:.2f}")
+                f"[{self.symbol}] BUY виконано @ {buy_order['price']:.2f}, створено SELL @ {sell_price:.2f} (pair_id={pair_id[:8]}...)")
 
         if self.parent_strategy and hasattr(self.parent_strategy, 'send_notification'):
             await self.parent_strategy.send_notification('grid', self.symbol, 'buy', buy_order['price'],
@@ -366,17 +369,23 @@ class GridInstance:
             await self._on_sell_filled(sell_order_id, self.active_sell_orders[sell_order_id], current_price)
 
     async def _on_sell_filled(self, order_id: str, sell_order: dict, current_price: float):
+        """Обробка виконання SELL ордера - розрахунок PnL"""
         buy_order = None
         for bo in self.active_buy_orders.values():
             if bo.get('pair_id') == sell_order['pair_id']:
                 buy_order = bo
                 break
+
         if not buy_order:
+            logger.warning(f"[{self.symbol}] Не знайдено BUY ордер для pair_id={sell_order['pair_id']}")
             self.locked_balance -= sell_order['quantity'] * sell_order['price']
+            if self.parent_strategy:
+                self.parent_strategy.increment_daily_trades()
+                self.parent_strategy.update_balance_for_drawdown()
             del self.active_sell_orders[order_id]
             return
 
-        buy_commission = sell_order['quantity'] * sell_order['price'] * 0.0018
+        buy_commission = buy_order['quantity'] * buy_order['price'] * 0.0018
         sell_commission = sell_order['quantity'] * sell_order['price'] * 0.0018
         total_commission = buy_commission + sell_commission
 
@@ -387,6 +396,7 @@ class GridInstance:
         self.balance += revenue - total_commission
         self.total_pnl += pnl
         self.total_trades += 1
+
         if pnl > 0:
             self.winning_trades += 1
         else:
@@ -403,12 +413,19 @@ class GridInstance:
         del self.active_sell_orders[order_id]
         if buy_order['order_id'] in self.active_buy_orders:
             del self.active_buy_orders[buy_order['order_id']]
+
         self.locked_balance -= sell_order['quantity'] * sell_order['price']
-        add_log("INFO", "grid", f"[{self.symbol}] SELL виконано @ {sell_order['price']:.2f}, PnL: ${pnl:.2f}")
+
+        add_log("INFO", "grid",
+                f"[{self.symbol}] SELL виконано @ {sell_order['price']:.2f}, PnL: ${pnl:.2f} (комісія: ${total_commission:.4f})")
 
         if self.parent_strategy and hasattr(self.parent_strategy, 'send_notification'):
             await self.parent_strategy.send_notification('grid', self.symbol, 'sell', sell_order['price'],
                                                          sell_order['quantity'], pnl)
+
+        if self.parent_strategy:
+            self.parent_strategy.increment_daily_trades()
+            self.parent_strategy.update_balance_for_drawdown()
 
         new_buy_price = sell_order['price'] - self.grid_spacing
         if new_buy_price >= self.lower_price:
@@ -465,28 +482,24 @@ class GridInstance:
             return []
 
         levels = []
-        active_buy_found = False  # ← Додати прапорець
+        active_buy_found = False
 
         for i in range(self.grid_levels + 1):
             price = self.lower_price + i * self.grid_spacing
 
             if price < current_price:
-                # BUY зона
                 is_active = any(abs(order['price'] - price) < self.grid_spacing / 2
                                 for order in self.active_buy_orders.values())
 
-                # ТІЛЬКИ НАЙБЛИЖЧИЙ ДО ЦІНИ BUY є активним
                 if is_active and not active_buy_found:
                     level_type = 'active_buy'
-                    active_buy_found = True  # ← Запам'ятовуємо, що активний вже знайдено
+                    active_buy_found = True
                 elif is_active:
-                    # Це інший BUY ордер (не найближчий) - має бути звичайним
                     level_type = 'buy'
                 else:
                     level_type = 'buy'
 
             elif price > current_price:
-                # SELL зона
                 is_active = any(abs(order['price'] - price) < self.grid_spacing / 2
                                 for order in self.active_sell_orders.values())
                 level_type = 'active_sell' if is_active else 'sell'

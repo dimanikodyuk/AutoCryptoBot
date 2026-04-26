@@ -4,7 +4,12 @@
     <title>Crypto Trading Bot</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Plotly для інших графіків -->
     <script src="https://cdn.plot.ly/plotly-3.0.1.min.js" charset="utf-8"></script>
+    <!-- Lightweight Charts - новий CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.js"></script>
+    <script src="https://cdn.plot.ly/plotly-3.0.1.min.js" charset="utf-8"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; }
@@ -20,7 +25,7 @@
         .tab-content.active { display: block; animation: fadeIn 0.3s; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 30px; }
-        .stat-card { background: #1a1a2e; border-radius: 12px; padding: 15px 20px; border: 1px solid #2a2a4a; transition: all 0.2s; }
+        .stat-card { background: #1a1a2e; border-radius: 12px; padding: 15px 20px; border: 1px solid #2a2a4a; transition: all 0.2s; cursor: pointer; }
         .stat-card:hover { transform: translateY(-2px); border-color: #00d4ff; }
         .stat-value { font-size: 28px; font-weight: bold; color: #00d4ff; }
         .stat-label { font-size: 11px; color: #888; margin-top: 5px; }
@@ -74,25 +79,32 @@
         .btn-small { background: #ff8800; padding: 4px 8px; font-size: 12px; }
         .btn-mode { padding: 6px 12px; margin: 0 5px; }
         .orders-table {
-    background: #1a1a2e;
-    border-radius: 12px;
-    overflow-x: auto;
-    margin-top: 20px;
-}
-.orders-table table {
-    width: 100%;
-    border-collapse: collapse;
-}
-.orders-table th, .orders-table td {
-    padding: 12px;
-    text-align: left;
-    border-bottom: 1px solid #2a2a4a;
-}
-.orders-table th {
-    background: #0f0f1a;
-    color: #888;
-    font-weight: normal;
-}
+            background: #1a1a2e;
+            border-radius: 12px;
+            overflow-x: auto;
+            margin-top: 20px;
+        }
+        .orders-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .orders-table th, .orders-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .orders-table th {
+            background: #0f0f1a;
+            color: #888;
+            font-weight: normal;
+        }
+        .orders-table tbody tr {
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .orders-table tbody tr:hover {
+            background: #252542;
+        }
         .buy { color: #00ff88; }
         .sell { color: #ff4444; }
         .news-item {
@@ -129,6 +141,98 @@
         .logs-container { max-height: 600px; overflow-y: auto; }
         .loading { text-align: center; padding: 40px; color: #888; }
         #candlestick_BTCUSDT, #candlestick_ETHUSDT, #candlestick_SOLUSDT { min-width: 800px; }
+
+        /* Модальне вікно для графіка угоди */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            animation: fadeIn 0.2s;
+        }
+        .modal-content {
+            background: #1a1a2e;
+            margin: 3% auto;
+            padding: 0;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 1200px;
+            border: 1px solid #2a2a4a;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            animation: slideIn 0.3s;
+        }
+        @keyframes slideIn {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .modal-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #2a2a4a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #0f0f1a;
+            border-radius: 16px 16px 0 0;
+        }
+        .modal-header h3 {
+            color: #00d4ff;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 28px;
+            cursor: pointer;
+            padding: 0 8px;
+        }
+        .modal-close:hover {
+            color: #ff4444;
+        }
+        .modal-body {
+            padding: 20px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .trade-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #0f0f1a;
+            border-radius: 12px;
+        }
+        .trade-info-item {
+            text-align: center;
+        }
+        .trade-info-label {
+            font-size: 11px;
+            color: #888;
+        }
+        .trade-info-value {
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .trade-info-value.buy { color: #00ff88; }
+        .trade-info-value.sell { color: #ff4444; }
+        .trade-chart-container {
+            min-height: 450px;
+            position: relative;
+        }
+        .loading-chart {
+            text-align: center;
+            padding: 50px;
+            color: #888;
+        }
+        #tradeChart {
+            width: 100%;
+            height: 450px;
+        }
+
         @media (max-width: 768px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } .strategies-grid { grid-template-columns: 1fr; } .tabs { overflow-x: auto; flex-wrap: nowrap; } }
     </style>
 </head>
@@ -144,6 +248,8 @@
         <div class="tab" data-tab="scalp">⚡ Скальпінг</div>
         <div class="tab" data-tab="news">📰 Новинна Стратегія</div>
         <div class="tab" data-tab="controls">⚙️ Керування</div>
+        <div class="tab" data-tab="backtest">📊 Бектестинг</div>
+        <div class="tab" data-tab="metrics">📈 Метрики</div>
         <div class="tab" data-tab="database">🗄️ База даних</div>
         <div class="tab" data-tab="logs">📋 Логи</div>
     </div>
@@ -180,6 +286,91 @@
             <div id="newsContent"><div class="loading">Завантаження новин...</div></div>
         </div>
 
+        <!-- Бектестинг -->
+        <div id="tab-backtest" class="tab-content">
+            <div class="settings-panel">
+                <h3>📊 Налаштування бектесту</h3>
+                <div class="settings-row">
+                    <label>Пара:</label>
+                    <select id="backtestSymbol">
+                        <option value="BTCUSDT">BTC/USDT</option>
+                        <option value="ETHUSDT">ETH/USDT</option>
+                        <option value="SOLUSDT">SOL/USDT</option>
+                        <option value="BNBUSDT">BNB/USDT</option>
+                        <option value="XRPUSDT">XRP/USDT</option>
+                    </select>
+                    <label>Таймфрейм:</label>
+                    <select id="backtestInterval">
+                        <option value="1">1 хвилина</option>
+                        <option value="5">5 хвилин</option>
+                        <option value="15" selected>15 хвилин</option>
+                        <option value="60">1 година</option>
+                        <option value="240">4 години</option>
+                        <option value="D">День</option>
+                    </select>
+                    <label>Початковий баланс (USDT):</label>
+                    <input type="number" id="backtestBalance" value="100" step="10" min="10">
+                </div>
+                <div class="settings-row">
+                    <label>Дата початку:</label>
+                    <input type="date" id="backtestStartDate">
+                    <label>Дата завершення:</label>
+                    <input type="date" id="backtestEndDate">
+                    <label>Інтервал (днів):</label>
+                    <button onclick="setBacktestRange(7)">7 днів</button>
+                    <button onclick="setBacktestRange(14)">14 днів</button>
+                    <button onclick="setBacktestRange(30)">30 днів</button>
+                    <button onclick="setBacktestRange(60)">60 днів</button>
+                </div>
+            </div>
+            <div class="settings-panel">
+                <h3>🎯 Параметри Grid стратегії</h3>
+                <div class="settings-row">
+                    <label>Рівнів сітки:</label>
+                    <input type="number" id="backtestGridLevels" value="10" min="3" max="30">
+                    <label>Розмір ордера (USDT):</label>
+                    <input type="number" id="backtestOrderSize" value="50" min="10" max="500">
+                    <label>Нижній діапазон (%):</label>
+                    <input type="number" id="backtestLowerPercent" value="20" min="5" max="50" step="5">
+                    <label>Верхній діапазон (%):</label>
+                    <input type="number" id="backtestUpperPercent" value="20" min="5" max="50" step="5">
+                </div>
+                <div class="settings-row">
+                    <button class="btn-refresh" onclick="runBacktest()">🚀 Запустити бектест</button>
+                    <button onclick="runOptimization()" style="background: #9b59b6;">🔧 Оптимізація параметрів</button>
+                </div>
+            </div>
+            <div id="backtestProgress" style="display: none;" class="loading">🔄 Виконується бектест...</div>
+            <div id="backtestResults" style="display: none;">
+                <div class="stats-grid" id="backtestStats"></div>
+                <div class="chart-card"><h3>📈 Графік PnL</h3><div id="backtestChart" style="height: 400px;"></div></div>
+                <div class="orders-table" id="backtestOrders"><div class="loading">Немає даних</div></div>
+            </div>
+            <div id="optimizationResults" style="display: none;">
+                <div class="settings-panel">
+                    <h3>🔧 Результати оптимізації (топ-20)</h3>
+                    <div class="orders-table" id="optimizationTable"><div class="loading">Немає даних</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Метрики -->
+        <div id="tab-metrics" class="tab-content">
+            <div class="settings-panel">
+                <h3>📊 Prometheus метрики</h3>
+                <div class="settings-row">
+                    <button onclick="loadMetrics()" class="btn-refresh">🔄 Оновити метрики</button>
+                    <button onclick="window.open('/metrics', '_blank')" style="background: #9b59b6;">📥 Скачати метрики (Prometheus)</button>
+                </div>
+            </div>
+            <div class="stats-grid" id="metricsSystem">
+                <div class="stat-card"><div class="stat-value" id="metricsCpu">-</div><div class="stat-label">CPU %</div></div>
+                <div class="stat-card"><div class="stat-value" id="metricsRam">-</div><div class="stat-label">RAM %</div></div>
+                <div class="stat-card"><div class="stat-value" id="metricsUptime">-</div><div class="stat-label">Uptime</div></div>
+            </div>
+            <div id="metricsContainer"><div class="loading">Завантаження метрик...</div></div>
+        </div>
+
         <!-- Керування -->
         <div id="tab-controls" class="tab-content">
             <div class="stats-grid" id="systemStats">
@@ -189,13 +380,13 @@
                 <div class="stat-card"><div class="stat-value" id="botUptime">-</div><div class="stat-label">Uptime</div></div>
             </div>
             <div class="stats-grid" id="electricityStats">
-    <div class="stat-card"><div class="stat-value" id="powerCost">-</div><div class="stat-label">Витрачено (грн)</div></div>
-    <div class="stat-card"><div class="stat-value" id="powerEnergy">-</div><div class="stat-label">Спожито (кВт⋅год)</div></div>
-    <div class="stat-card"><div class="stat-value" id="powerMonthly">-</div><div class="stat-label">За місяць (грн)</div></div>
-    <div class="stat-card"><div class="stat-value" id="powerYearly">-</div><div class="stat-label">За рік (грн)</div></div>
-    <div class="stat-card"><div class="stat-value" id="currentPower">-</div><div class="stat-label">Поточна потужність (W)</div></div>
-    <div class="stat-card"><div class="stat-value" id="cpuLoad">-</div><div class="stat-label">CPU</div></div>
-</div>
+                <div class="stat-card"><div class="stat-value" id="powerCost">-</div><div class="stat-label">Витрачено (грн)</div></div>
+                <div class="stat-card"><div class="stat-value" id="powerEnergy">-</div><div class="stat-label">Спожито (кВт⋅год)</div></div>
+                <div class="stat-card"><div class="stat-value" id="powerMonthly">-</div><div class="stat-label">За місяць (грн)</div></div>
+                <div class="stat-card"><div class="stat-value" id="powerYearly">-</div><div class="stat-label">За рік (грн)</div></div>
+                <div class="stat-card"><div class="stat-value" id="currentPower">-</div><div class="stat-label">Поточна потужність (W)</div></div>
+                <div class="stat-card"><div class="stat-value" id="cpuLoad">-</div><div class="stat-label">CPU</div></div>
+            </div>
             <div class="settings-panel">
                 <h3>🎮 Режим роботи</h3>
                 <div class="settings-row">
@@ -282,6 +473,22 @@
         </div>
     </div>
 
+    <!-- Модальне вікно для графіка угоди -->
+    <div id="tradeModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📊 Деталі угоди</h3>
+                <button class="modal-close" onclick="closeTradeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="tradeInfo" class="trade-info"></div>
+                <div id="tradeChartContainer" class="trade-chart-container">
+                    <div class="loading-chart">Завантаження графіка...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         let autoRefreshInterval = setInterval(() => { loadAllData(); loadSystemStatus(); loadElectricity(); loadMode(); if(document.getElementById('currentMode')?.innerText === '🔴 РЕАЛЬНИЙ') loadRealBalance(); }, 10000);
 
@@ -291,6 +498,7 @@
         let currentSortColumn = 'id';
         let currentSortOrder = 'desc';
         let activeCharts = {};
+        let tradeChart = null;
 
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -305,6 +513,8 @@
                 if (tabName === 'database') { loadDatabaseInfo(); }
                 if (tabName === 'logs') loadLogs();
                 if (tabName === 'controls') { loadSystemStatus(); loadElectricity(); loadMode(); loadRealBalance(); }
+                if (tabName === 'backtest') { setDefaultBacktestDates(); }
+                if (tabName === 'metrics') { loadMetrics(); }
             });
         });
 
@@ -345,6 +555,14 @@
                             <button class="btn-toggle" onclick="toggleStrategy(${s.id})">${s.enabled ? '❌ Зупинити' : '✅ Запустити'}</button>
                             <button class="btn-reset" onclick="resetStrategy(${s.id})">🔄 Скинути</button>
                         </div>
+                        <div class="strategy-stat">
+                            <div class="strategy-stat-value">${s.daily_trades_count || 0}/${s.max_daily_trades || 50}</div>
+                            <div class="strategy-stat-label">Угоди сьогодні</div>
+                        </div>
+                        <div class="strategy-stat">
+                            <div class="strategy-stat-value ${s.is_blocked ? 'stat-negative' : 'stat-positive'}">${s.is_blocked ? '🔒' : '✅'}</div>
+                            <div class="strategy-stat-label">Ліміти</div>
+                        </div>
                     </div>
                 `).join('');
             } catch(e) { console.error(e); }
@@ -355,7 +573,6 @@
             document.querySelector(`.tab[data-tab="${tabName}"]`).click();
         }
 
-        // ============= РЕЖИМ РОБОТИ =============
         async function loadMode() {
             try {
                 const response = await fetch('/api/mode');
@@ -379,13 +596,9 @@
 
         async function changeMode(mode) {
             const modeNames = { simulation: 'Симуляція', monitor: 'Моніторинг', real: 'РЕАЛЬНИЙ (справжні гроші!)' };
-
             if (mode === 'real') {
-                if (!confirm('⚠️ УВАГА! Ви збираєтесь перейти в РЕАЛЬНИЙ режим. Всі угоди будуть виконуватись на справжні кошти. Ви підтверджуєте?')) {
-                    return;
-                }
+                if (!confirm('⚠️ УВАГА! Ви збираєтесь перейти в РЕАЛЬНИЙ режим. Всі угоди будуть виконуватись на справжні кошти. Ви підтверджуєте?')) return;
             }
-
             try {
                 const response = await fetch('/api/mode', {
                     method: 'POST',
@@ -393,18 +606,13 @@
                     body: JSON.stringify({ mode: mode, confirm: mode === 'real' })
                 });
                 const data = await response.json();
-
                 if (data.need_confirmation) {
-                    if (confirm(data.message)) {
-                        await changeMode(mode);
-                    }
+                    if (confirm(data.message)) await changeMode(mode);
                 } else if (data.success) {
                     alert(`✅ Режим змінено: ${modeNames[mode]}`);
                     loadMode();
                     if (mode === 'real') loadRealBalance();
-                } else {
-                    alert('❌ Помилка: ' + (data.error || 'невідома'));
-                }
+                } else alert('❌ Помилка: ' + (data.error || 'невідома'));
             } catch(e) { console.error(e); }
         }
 
@@ -506,13 +714,10 @@
                         let diffSymbol = diffPercent > 0 ? '▲' : '▼';
                         html += `<div class="grid-row"><div style="width:45px;">L${level.level}</div><div class="${levelClass}"><div><b>$${level.price.toFixed(2)}</b> <span style="color:${diffColor};">${diffSymbol} ${Math.abs(diffPercent)}%</span></div><div style="font-size:11px; background:${borderColor}22; padding:2px 8px; border-radius:12px;">${typeLabel}</div></div></div>`;
                     }
-                } else {
-                    html += '<div class="loading">Немає рівнів сітки. Запустіть стратегію.</div>';
-                }
+                } else html += '<div class="loading">Немає рівнів сітки. Запустіть стратегію.</div>';
                 html += `</div></div>`;
                 html += `<div class="chart-card"><h3>📈 Графік PnL - ${symbol}</h3><div id="pnlChart_${symbol}" style="height:300px;"></div></div>`;
                 document.getElementById('gridVisualization').innerHTML = html;
-
                 const pnlResponse = await fetch(`/api/strategy_data/grid`);
                 const pnlData = await pnlResponse.json();
                 let timestamps = [new Date().toLocaleString()], cumulativePnl = [0], chartTitle = 'Cumulative PnL (очікує угод)', lineColor = '#888', lineWidth = 1, lineDash = 'dot';
@@ -527,28 +732,20 @@
                 }
                 const maxPnl = Math.max(...cumulativePnl, 10), minPnl = Math.min(...cumulativePnl, -10);
                 Plotly.newPlot(`pnlChart_${symbol}`, [{ x: timestamps, y: cumulativePnl, type: 'scatter', mode: 'lines+markers', name: chartTitle, line: { color: lineColor, width: lineWidth, dash: lineDash }, marker: { size: 6, color: lineColor } }], { paper_bgcolor: '#1a1a2e', plot_bgcolor: '#1a1a2e', font: { color: '#e0e0e0' }, xaxis: { title: 'Час', gridcolor: '#2a2a4a', tickangle: -45 }, yaxis: { title: 'PnL (USDT)', gridcolor: '#2a2a4a', range: [minPnl-2, maxPnl+2] }, showlegend: true, legend: { x: 0.5, y: -0.2, orientation: 'h' } }, { responsive: true });
-
                 await addCandlestickChart(symbol);
-
             } catch(e) { console.error(e); document.getElementById('gridVisualization').innerHTML = '<div class="loading">Помилка завантаження сітки</div>'; }
         }
 
         async function addCandlestickChart(symbol) {
             const chartDiv = document.getElementById(`candlestick_${symbol}`);
             if (chartDiv) return;
-
             const container = document.getElementById('gridVisualization');
             const chartHtml = `<div class="chart-card" style="margin-top:20px;">
                 <h3>📊 Графік ${symbol}</h3>
                 <div class="filter-bar">
                     <select id="tf_${symbol}" onchange="loadKlines('${symbol}')">
-                        <option value="1">1 хвилина</option>
-                        <option value="5">5 хвилин</option>
-                        <option value="15">15 хвилин</option>
-                        <option value="60">1 година</option>
-                        <option value="240">4 години</option>
-                        <option value="D">День</option>
-                        <option value="W">Тиждень</option>
+                        <option value="1">1 хвилина</option><option value="5">5 хвилин</option><option value="15">15 хвилин</option>
+                        <option value="60">1 година</option><option value="240">4 години</option><option value="D">День</option><option value="W">Тиждень</option>
                     </select>
                     <button onclick="loadKlines('${symbol}')">🔄 Оновити</button>
                 </div>
@@ -561,50 +758,17 @@
         async function loadKlines(symbol) {
             const interval = document.getElementById(`tf_${symbol}`)?.value || '1';
             let limit = 100;
-            switch(interval) {
-                case '1': limit = 200; break;
-                case '5': limit = 200; break;
-                case '15': limit = 200; break;
-                case '60': limit = 150; break;
-                case '240': limit = 120; break;
-                case 'D': limit = 90; break;
-                case 'W': limit = 52; break;
-                default: limit = 100;
-            }
+            switch(interval) { case '1': limit = 200; break; case '5': limit = 200; break; case '15': limit = 200; break; case '60': limit = 150; break; case '240': limit = 120; break; case 'D': limit = 90; break; case 'W': limit = 52; break; default: limit = 100; }
             try {
                 const response = await fetch(`/api/klines/${symbol}?interval=${interval}&limit=${limit}`);
                 let data = await response.json();
                 if (!data || data.length === 0) return;
                 data.sort((a, b) => a.timestamp - b.timestamp);
-
                 const timestamps = data.map(k => new Date(k.timestamp).toLocaleString());
-                const open = data.map(k => k.open);
-                const high = data.map(k => k.high);
-                const low = data.map(k => k.low);
-                const close = data.map(k => k.close);
-                const volume = data.map(k => k.volume);
-
-                const candlestick = {
-                    x: timestamps, open: open, high: high, low: low, close: close,
-                    type: 'candlestick', name: 'Ціна',
-                    increasing: { line: { color: '#00ff88' } },
-                    decreasing: { line: { color: '#ff4444' } }
-                };
-                const volumeTrace = {
-                    x: timestamps, y: volume, type: 'bar', name: 'Об\'єм',
-                    marker: { color: '#00d4ff', opacity: 0.5 }, yaxis: 'y2'
-                };
-                const layout = {
-                    paper_bgcolor: '#1a1a2e', plot_bgcolor: '#1a1a2e',
-                    font: { color: '#e0e0e0' },
-                    xaxis: { title: 'Час', gridcolor: '#2a2a4a', tickangle: -45, type: 'category' },
-                    yaxis: { title: 'Ціна (USDT)', gridcolor: '#2a2a4a', side: 'left', autorange: true },
-                    yaxis2: { title: 'Об\'єм', gridcolor: '#2a2a4a', overlaying: 'y', side: 'right', autorange: true },
-                    hovermode: 'x', margin: { l: 60, r: 60, t: 30, b: 80 },
-                    legend: { orientation: 'h', y: 1.1, x: 0, bgcolor: 'rgba(0,0,0,0)' },
-                    dragmode: 'zoom', showlegend: true
-                };
-
+                const open = data.map(k => k.open), high = data.map(k => k.high), low = data.map(k => k.low), close = data.map(k => k.close), volume = data.map(k => k.volume);
+                const candlestick = { x: timestamps, open: open, high: high, low: low, close: close, type: 'candlestick', name: 'Ціна', increasing: { line: { color: '#00ff88' } }, decreasing: { line: { color: '#ff4444' } } };
+                const volumeTrace = { x: timestamps, y: volume, type: 'bar', name: 'Об\'єм', marker: { color: '#00d4ff', opacity: 0.5 }, yaxis: 'y2' };
+                const layout = { paper_bgcolor: '#1a1a2e', plot_bgcolor: '#1a1a2e', font: { color: '#e0e0e0' }, xaxis: { title: 'Час', gridcolor: '#2a2a4a', tickangle: -45, type: 'category' }, yaxis: { title: 'Ціна (USDT)', gridcolor: '#2a2a4a', side: 'left', autorange: true }, yaxis2: { title: 'Об\'єм', gridcolor: '#2a2a4a', overlaying: 'y', side: 'right', autorange: true }, hovermode: 'x', margin: { l: 60, r: 60, t: 30, b: 80 }, legend: { orientation: 'h', y: 1.1, x: 0, bgcolor: 'rgba(0,0,0,0)' }, dragmode: 'zoom', showlegend: true };
                 const gridResponse = await fetch(`/api/grid_levels/${symbol}`);
                 const gridData = await gridResponse.json();
                 let shapes = [], annotations = [];
@@ -620,53 +784,35 @@
                         else if (level.type === 'active_sell') { lineColor = '#ff4444'; lineWidth = 2; dash = 'solid'; }
                         else if (level.type === 'neutral') { lineColor = '#00d4ff'; lineWidth = 2; dash = 'solid'; }
                         shapes.push({ type: 'line', x0: 0, x1: 1, xref: 'paper', y0: level.price, y1: level.price, line: { color: lineColor, width: lineWidth, dash: dash }, yref: 'y' });
-                        if (level.type === 'active_buy' || level.type === 'active_sell') {
-                            annotations.push({ x: 0, y: level.price, xref: 'paper', yref: 'y', text: `${level.type === 'active_buy' ? '🟢' : '🔴'} ${level.price.toFixed(2)}`, showarrow: false, xanchor: 'left', font: { color: lineColor, size: 10 } });
-                        }
+                        if (level.type === 'active_buy' || level.type === 'active_sell') annotations.push({ x: 0, y: level.price, xref: 'paper', yref: 'y', text: `${level.type === 'active_buy' ? '🟢' : '🔴'} ${level.price.toFixed(2)}`, showarrow: false, xanchor: 'left', font: { color: lineColor, size: 10 } });
                     }
                 }
                 layout.shapes = shapes; layout.annotations = annotations;
-
                 const chartDiv = document.getElementById(`candlestick_${symbol}`);
-                if (chartDiv) {
-                    Plotly.purge(chartDiv);
-                    Plotly.newPlot(chartDiv, [candlestick, volumeTrace], layout, { responsive: true });
-                    activeCharts[symbol] = true;
-                }
+                if (chartDiv) { Plotly.purge(chartDiv); Plotly.newPlot(chartDiv, [candlestick, volumeTrace], layout, { responsive: true }); activeCharts[symbol] = true; }
             } catch(e) { console.error('Помилка графіка:', e); }
         }
 
         async function loadGridOrders() {
-    const side = document.getElementById('gridOrderSideFilter')?.value || 'all';
-    const status = document.getElementById('gridOrderStatusFilter')?.value || 'all';
-    const limit = document.getElementById('gridOrderLimit')?.value || 20;
-    try {
-        const response = await fetch(`/api/orders?side=${side}&status=${status}&limit=${limit}&strategy=grid`);
-        const orders = await response.json();
-        const table = document.getElementById('gridOrdersTable');
-        if (!table) return;
-        if (orders.length === 0) {
-            table.innerHTML = '<div class="loading">Немає ордерів</div>';
-            return;
+            const side = document.getElementById('gridOrderSideFilter')?.value || 'all';
+            const status = document.getElementById('gridOrderStatusFilter')?.value || 'all';
+            const limit = document.getElementById('gridOrderLimit')?.value || 20;
+            try {
+                const response = await fetch(`/api/orders?side=${side}&status=${status}&limit=${limit}&strategy=grid`);
+                const orders = await response.json();
+                const table = document.getElementById('gridOrdersTable');
+                if (!table) return;
+                if (orders.length === 0) { table.innerHTML = '<div class="loading">Немає ордерів</div>'; return; }
+                let html = `<table><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th><th>Дія</th></tr></thead><tbody>`;
+                for (const o of orders) {
+                    html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${o.pnl || 0}, '${o.opened_at}')" style="cursor:pointer;">`;
+                    html += `<td>${new Date(o.opened_at).toLocaleString()}</td><td>${o.symbol}</td><td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td><td>$${parseFloat(o.price).toFixed(2)}</td><td>${parseFloat(o.quantity).toFixed(6)}</td><td>${o.status === 'open' ? '🟢 Відкрито' : (o.status === 'closed' ? '🔒 Закрито' : '❌ Скасовано')}</td><td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td>`;
+                    html += `<td onclick="event.stopPropagation()">${o.status === 'open' ? `<button class="btn-small" onclick="cancelOrder('grid', '${o.symbol}', '${o.order_id}')">❌</button>` : ''}</td></tr>`;
+                }
+                html += `</tbody></table>`;
+                table.innerHTML = html;
+            } catch(e) { console.error(e); }
         }
-
-        let html = `<table><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th><th>Дія</th></tr></thead><tbody>`;
-        for (const o of orders) {
-            html += `<tr>`;
-            html += `<td>${new Date(o.opened_at).toLocaleString()}</td>`;
-            html += `<td>${o.symbol}</td>`;
-            html += `<td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td>`;
-            html += `<td>$${parseFloat(o.price).toFixed(2)}</td>`;
-            html += `<td>${parseFloat(o.quantity).toFixed(6)}</td>`;
-            html += `<td>${o.status === 'open' ? '🟢 Відкрито' : (o.status === 'closed' ? '🔒 Закрито' : '❌ Скасовано')}</td>`;
-            html += `<td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td>`;
-            html += `<td>${o.status === 'open' ? `<button class="btn-small" onclick="cancelOrder('grid', '${o.symbol}', '${o.order_id}')">❌</button>` : ''}</td>`;
-            html += `</tr>`;
-        }
-        html += `</tbody></table>`;
-        table.innerHTML = html;
-    } catch(e) { console.error(e); }
-}
 
         async function updateGridSettings() {
             const symbolsList = document.getElementById('gridSymbolsList').value.split(',').map(s => s.trim().toUpperCase());
@@ -686,7 +832,7 @@
                 const resp = await fetch('/api/cancel_order', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({strategy: strategy, symbol: symbol, order_id: orderId}) });
                 const data = await resp.json();
                 if(data.success) { alert('Ордер скасовано'); loadGridStrategy(); }
-                else { alert('Помилка: '+ (data.error || 'невідома')); }
+                else alert('Помилка: '+ (data.error || 'невідома'));
             }
         }
 
@@ -695,65 +841,21 @@
             try {
                 const response = await fetch('/api/scalp_status');
                 const data = await response.json();
-
-                if (data.error) {
-                    document.getElementById('scalpContent').innerHTML = `<div class="loading">${data.error}</div>`;
-                    return;
-                }
-
+                if (data.error) { document.getElementById('scalpContent').innerHTML = `<div class="loading">${data.error}</div>`; return; }
                 let positionsHtml = '';
                 if (data.open_positions && Object.keys(data.open_positions).length > 0) {
                     positionsHtml = '<h3>📊 Активні позиції</h3>';
                     for (const [symbol, pos] of Object.entries(data.open_positions)) {
                         const currentPrice = data.current_price?.[symbol] || pos.entry_price;
                         const pnlPercent = (currentPrice - pos.entry_price) / pos.entry_price * 100;
-                        positionsHtml += `
-                            <div class="scalp-position-card">
-                                <div><strong>${symbol}</strong></div>
-                                <div>Вхід: $${pos.entry_price.toFixed(2)}</div>
-                                <div>Кількість: ${pos.quantity.toFixed(6)}</div>
-                                <div>Поточна: $${currentPrice.toFixed(2)}</div>
-                                <div class="${pnlPercent >= 0 ? 'scalp-positive' : 'scalp-negative'}">PnL: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%</div>
-                            </div>
-                        `;
+                        positionsHtml += `<div class="scalp-position-card"><div><strong>${symbol}</strong></div><div>Вхід: $${pos.entry_price.toFixed(2)}</div><div>Кількість: ${pos.quantity.toFixed(6)}</div><div>Поточна: $${currentPrice.toFixed(2)}</div><div class="${pnlPercent >= 0 ? 'scalp-positive' : 'scalp-negative'}">PnL: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%</div></div>`;
                     }
-                } else {
-                    positionsHtml = '<div class="loading">Немає активних позицій</div>';
-                }
-
-                let html = `
-                    <div class="settings-panel">
-                        <h3>⚡ Налаштування Скальпінг стратегії</h3>
-                        <div class="settings-row">
-                            <label>Торгові пари:</label>
-                            <input type="text" id="scalpSymbols" value="${(data.symbols || ['BTCUSDT']).join(',')}" style="width: 250px;">
-                            <label>Розмір угоди (USDT):</label>
-                            <input type="number" id="scalpTradeSize" value="${data.trade_size_usdt || 20}" min="5" max="100" step="5">
-                            <label>Профіт %:</label>
-                            <input type="number" id="scalpTakeProfit" value="${data.take_profit_percent || 0.5}" step="0.1" min="0.1" max="2">
-                            <label>Стоп-лосс %:</label>
-                            <input type="number" id="scalpStopLoss" value="${data.stop_loss_percent || 0.25}" step="0.1" min="0.1" max="1">
-                            <button class="btn-save" onclick="updateScalpSettings()">💾 Зберегти</button>
-                        </div>
-                    </div>
-                    <div class="stats-grid">
-                        <div class="stat-card"><div class="stat-value">$${data.balance?.toFixed(2) || 0}</div><div class="stat-label">Баланс</div></div>
-                        <div class="stat-card"><div class="stat-value">$${data.locked_balance?.toFixed(2) || 0}</div><div class="stat-label">Заблоковано</div></div>
-                        <div class="stat-card"><div class="stat-value">$${data.available_balance?.toFixed(2) || 0}</div><div class="stat-label">Доступно</div></div>
-                        <div class="stat-card"><div class="stat-value ${(data.total_pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${data.total_pnl?.toFixed(2) || 0}</div><div class="stat-label">Загальний PnL</div></div>
-                        <div class="stat-card"><div class="stat-value">${data.total_trades || 0}</div><div class="stat-label">Всього угод</div></div>
-                        <div class="stat-card"><div class="stat-value">${data.win_rate || 0}%</div><div class="stat-label">Win Rate</div></div>
-                    </div>
-                    ${positionsHtml}
-                    <h3 style="margin-top: 20px;">📋 Ордери скальпінг стратегії</h3>
-                    <div class="filter-bar">
-                        <select id="scalpOrderSideFilter"><option value="all">Всі сторони</option><option value="buy">Купівля</option><option value="sell">Продаж</option></select>
-                        <select id="scalpOrderStatusFilter"><option value="all">Всі статуси</option><option value="open">Відкриті</option><option value="closed">Закриті</option></select>
-                        <input type="number" id="scalpOrderLimit" placeholder="Кількість" value="20">
-                        <button onclick="loadScalpOrders()">Застосувати</button>
-                    </div>
-                    <div class="orders-table" id="scalpOrdersTable"><div class="loading">Завантаження ордерів...</div></div>
-                `;
+                } else positionsHtml = '<div class="loading">Немає активних позицій</div>';
+                let html = `<div class="settings-panel"><h3>⚡ Налаштування Скальпінг стратегії</h3><div class="settings-row"><label>Торгові пари:</label><input type="text" id="scalpSymbols" value="${(data.symbols || ['BTCUSDT']).join(',')}" style="width: 250px;"><label>Розмір угоди (USDT):</label><input type="number" id="scalpTradeSize" value="${data.trade_size_usdt || 20}" min="5" max="100" step="5"><label>Профіт %:</label><input type="number" id="scalpTakeProfit" value="${data.take_profit_percent || 0.5}" step="0.1" min="0.1" max="2"><label>Стоп-лосс %:</label><input type="number" id="scalpStopLoss" value="${data.stop_loss_percent || 0.25}" step="0.1" min="0.1" max="1"><button class="btn-save" onclick="updateScalpSettings()">💾 Зберегти</button></div></div>
+                <div class="stats-grid"><div class="stat-card"><div class="stat-value">$${data.balance?.toFixed(2) || 0}</div><div class="stat-label">Баланс</div></div><div class="stat-card"><div class="stat-value">$${data.locked_balance?.toFixed(2) || 0}</div><div class="stat-label">Заблоковано</div></div><div class="stat-card"><div class="stat-value">$${data.available_balance?.toFixed(2) || 0}</div><div class="stat-label">Доступно</div></div><div class="stat-card"><div class="stat-value ${(data.total_pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${data.total_pnl?.toFixed(2) || 0}</div><div class="stat-label">Загальний PnL</div></div><div class="stat-card"><div class="stat-value">${data.total_trades || 0}</div><div class="stat-label">Всього угод</div></div><div class="stat-card"><div class="stat-value">${data.win_rate || 0}%</div><div class="stat-label">Win Rate</div></div></div>
+                ${positionsHtml}<h3 style="margin-top: 20px;">📋 Ордери скальпінг стратегії</h3>
+                <div class="filter-bar"><select id="scalpOrderSideFilter"><option value="all">Всі сторони</option><option value="buy">Купівля</option><option value="sell">Продаж</option></select><select id="scalpOrderStatusFilter"><option value="all">Всі статуси</option><option value="open">Відкриті</option><option value="closed">Закриті</option></select><input type="number" id="scalpOrderLimit" placeholder="Кількість" value="20"><button onclick="loadScalpOrders()">Застосувати</button></div>
+                <div class="orders-table" id="scalpOrdersTable"><div class="loading">Завантаження ордерів...</div></div>`;
                 document.getElementById('scalpContent').innerHTML = html;
                 loadScalpOrders();
             } catch(e) { console.error(e); document.getElementById('scalpContent').innerHTML = '<div class="loading">Помилка завантаження</div>'; }
@@ -769,9 +871,13 @@
                 const table = document.getElementById('scalpOrdersTable');
                 if (!table) return;
                 if (orders.length === 0) { table.innerHTML = '<div class="loading">Немає ордерів</div>'; return; }
-                table.innerHTML = `<table><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th></tr></thead><tbody>${
-                    orders.map(o => `<tr><td>${new Date(o.opened_at).toLocaleString()}</td><td>${o.symbol}</td><td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td><td>$${parseFloat(o.price).toFixed(2)}</td><td>${parseFloat(o.quantity).toFixed(6)}</td><td>${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td><td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td></tr>`
-                ).join('')}</tbody></table>`;
+                let html = `<table><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th></tr></thead><tbody>`;
+                for (const o of orders) {
+                    html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${o.pnl || 0}, '${o.opened_at}')" style="cursor:pointer;">`;
+                    html += `<td>${new Date(o.opened_at).toLocaleString()}</td><td>${o.symbol}</td><td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td><td>$${parseFloat(o.price).toFixed(2)}</td><td>${parseFloat(o.quantity).toFixed(6)}</td><td>${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td><td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td></tr>`;
+                }
+                html += `</tbody></table>`;
+                table.innerHTML = html;
             } catch(e) { console.error(e); }
         }
 
@@ -781,11 +887,7 @@
             const takeProfit = parseFloat(document.getElementById('scalpTakeProfit').value);
             const stopLoss = parseFloat(document.getElementById('scalpStopLoss').value);
             try {
-                await fetch('/api/scalp_settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ symbols: symbols, trade_size_usdt: tradeSize, take_profit_percent: takeProfit, stop_loss_percent: stopLoss })
-                });
+                await fetch('/api/scalp_settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbols: symbols, trade_size_usdt: tradeSize, take_profit_percent: takeProfit, stop_loss_percent: stopLoss }) });
                 alert('Налаштування збережено!');
                 loadScalpStrategy();
             } catch(e) { console.error(e); }
@@ -807,34 +909,16 @@
                     totalTrades = newsStrategy.total_trades || 0;
                     winRate = newsStrategy.win_rate || 0;
                 }
-                let html = `
-                    <div class="settings-panel">
-                        <h3>📰 Налаштування Новинної стратегії</h3>
-                        <div class="settings-row">
-                            <label>Криптовалюти:</label><input type="text" id="newsSymbols" value="${currentSymbols}" style="width:200px;">
-                            <label>Інтервал (хв):</label><input type="number" id="newsInterval" value="${currentInterval}" min="1" max="60">
-                            <label>Чутливість:</label><select id="newsSensitivity"><option value="low" ${currentSensitivity==='low'?'selected':''}>Низька</option><option value="medium" ${currentSensitivity==='medium'?'selected':''}>Середня</option><option value="high" ${currentSensitivity==='high'?'selected':''}>Висока</option></select>
-                            <button class="btn-save" onclick="saveNewsSettings()">💾 Зберегти</button>
-                        </div>
-                    </div>
-                    <div class="stats-grid">
-                        <div class="stat-card"><div class="stat-value">$${balance.toFixed(2)}</div><div class="stat-label">Баланс (USDT)</div></div>
-                        <div class="stat-card"><div class="stat-value ${totalPnl>=0?'stat-positive':'stat-negative'}">$${totalPnl.toFixed(2)}</div><div class="stat-label">Загальний PnL</div></div>
-                        <div class="stat-card"><div class="stat-value">${totalTrades}</div><div class="stat-label">Всього угод</div></div>
-                        <div class="stat-card"><div class="stat-value">${winRate}%</div><div class="stat-label">Win Rate</div></div>
-                        <div class="stat-card"><div class="stat-value" id="newsSentiment">-</div><div class="stat-label">Поточний сентимент</div></div>
-                        <div class="stat-card"><div class="stat-value" id="newsCount">0</div><div class="stat-label">Новин за годину</div></div>
-                        <div class="stat-card"><div class="stat-value" id="apiStatus">-</div><div class="stat-label">API ключ</div></div>
-                    </div>
-                    <div class="chart-card"><h3>📊 Аналіз сентименту новин</h3><div id="sentimentChart" style="height:350px;"></div></div>
-                    <div class="chart-card"><h3>📈 Динаміка сентименту</h3><div id="sentimentTrendChart" style="height:300px;"></div></div>
-                    <h3>📰 Останні новини</h3>
-                    <div class="filter-bar"><select id="newsSentimentFilter"><option value="all">Всі новини</option><option value="positive">Позитивні</option><option value="neutral">Нейтральні</option><option value="negative">Негативні</option></select><input type="number" id="newsLimit" placeholder="Кількість" value="15"><button onclick="loadNewsData()">Застосувати</button></div>
-                    <div id="newsList"></div>
-                    <h3>📋 Ордери новинної стратегії</h3>
-                    <div class="filter-bar"><select id="newsOrderSideFilter"><option value="all">Всі сторони</option><option value="buy">Купівля</option><option value="sell">Продаж</option></select><select id="newsOrderStatusFilter"><option value="all">Всі статуси</option><option value="open">Відкриті</option><option value="closed">Закриті</option></select><input type="number" id="newsOrderLimit" placeholder="Кількість" value="20"><button onclick="loadNewsOrders()">Застосувати</button></div>
-                    <div class="orders-table" id="newsOrdersTable"><div class="loading">Завантаження ордерів...</div></div>
-                `;
+                let html = `<div class="settings-panel"><h3>📰 Налаштування Новинної стратегії</h3><div class="settings-row"><label>Криптовалюти:</label><input type="text" id="newsSymbols" value="${currentSymbols}" style="width:200px;"><label>Інтервал (хв):</label><input type="number" id="newsInterval" value="${currentInterval}" min="1" max="60"><label>Чутливість:</label><select id="newsSensitivity"><option value="low" ${currentSensitivity==='low'?'selected':''}>Низька</option><option value="medium" ${currentSensitivity==='medium'?'selected':''}>Середня</option><option value="high" ${currentSensitivity==='high'?'selected':''}>Висока</option></select><button class="btn-save" onclick="saveNewsSettings()">💾 Зберегти</button></div></div>
+                <div class="stats-grid"><div class="stat-card"><div class="stat-value">$${balance.toFixed(2)}</div><div class="stat-label">Баланс (USDT)</div></div><div class="stat-card"><div class="stat-value ${totalPnl>=0?'stat-positive':'stat-negative'}">$${totalPnl.toFixed(2)}</div><div class="stat-label">Загальний PnL</div></div><div class="stat-card"><div class="stat-value">${totalTrades}</div><div class="stat-label">Всього угод</div></div><div class="stat-card"><div class="stat-value">${winRate}%</div><div class="stat-label">Win Rate</div></div><div class="stat-card"><div class="stat-value" id="newsSentiment">-</div><div class="stat-label">Поточний сентимент</div></div><div class="stat-card"><div class="stat-value" id="newsCount">0</div><div class="stat-label">Новин за годину</div></div><div class="stat-card"><div class="stat-value" id="apiStatus">-</div><div class="stat-label">API ключ</div></div></div>
+                <div class="chart-card"><h3>📊 Аналіз сентименту новин</h3><div id="sentimentChart" style="height:350px;"></div></div>
+                <div class="chart-card"><h3>📈 Динаміка сентименту</h3><div id="sentimentTrendChart" style="height:300px;"></div></div>
+                <h3>📰 Останні новини</h3>
+                <div class="filter-bar"><select id="newsSentimentFilter"><option value="all">Всі новини</option><option value="positive">Позитивні</option><option value="neutral">Нейтральні</option><option value="negative">Негативні</option></select><input type="number" id="newsLimit" placeholder="Кількість" value="15"><button onclick="loadNewsData()">Застосувати</button></div>
+                <div id="newsList"></div>
+                <h3>📋 Ордери новинної стратегії</h3>
+                <div class="filter-bar"><select id="newsOrderSideFilter"><option value="all">Всі сторони</option><option value="buy">Купівля</option><option value="sell">Продаж</option></select><select id="newsOrderStatusFilter"><option value="all">Всі статуси</option><option value="open">Відкриті</option><option value="closed">Закриті</option></select><input type="number" id="newsOrderLimit" placeholder="Кількість" value="20"><button onclick="loadNewsOrders()">Застосувати</button></div>
+                <div class="orders-table" id="newsOrdersTable"><div class="loading">Завантаження ордерів...</div></div>`;
                 document.getElementById('newsContent').innerHTML = html;
                 loadNewsData(); loadNewsOrders();
             } catch(e) { console.error(e); document.getElementById('newsContent').innerHTML = '<div class="loading">Помилка завантаження</div>'; }
@@ -850,9 +934,13 @@
                 const table = document.getElementById('newsOrdersTable');
                 if (!table) return;
                 if (orders.length === 0) { table.innerHTML = '<div class="loading">Немає ордерів</div>'; return; }
-                table.innerHTML = `<table><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th></tr></thead><tbody>${
-                    orders.map(o => `<tr><td>${new Date(o.opened_at).toLocaleString()}<table><td>${o.symbol}</td><td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}<td><td>$${parseFloat(o.price).toFixed(2)}</td><td>${parseFloat(o.quantity).toFixed(6)}</td><td>${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td><td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td></tr>`
-                ).join('')}</tbody></table>`;
+                let html = `<table><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th></tr></thead><tbody>`;
+                for (const o of orders) {
+                    html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${o.pnl || 0}, '${o.opened_at}')" style="cursor:pointer;">`;
+                    html += `<td>${new Date(o.opened_at).toLocaleString()}</td><td>${o.symbol}</td><td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td><td>$${parseFloat(o.price).toFixed(2)}</td><td>${parseFloat(o.quantity).toFixed(6)}</td><td>${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td><td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td></tr>`;
+                }
+                html += `</tbody></table>`;
+                table.innerHTML = html;
             } catch(e) { console.error(e); }
         }
 
@@ -885,7 +973,7 @@
                     const timestamps = data.sentiment_history.map(h => new Date(h.timestamp).toLocaleString());
                     const sentimentScores = data.sentiment_history.map(h => { if (h.overall === 'positive') return 1; if (h.overall === 'negative') return -1; return 0; });
                     Plotly.newPlot('sentimentTrendChart', [{ x: timestamps, y: sentimentScores, type: 'scatter', mode: 'lines+markers', name: 'Сентимент', line: { color: '#00d4ff', width: 2 }, marker: { size: 6, color: '#00d4ff' } }], { paper_bgcolor: '#1a1a2e', plot_bgcolor: '#1a1a2e', font: { color: '#e0e0e0' }, xaxis: { title: 'Час', gridcolor: '#2a2a4a', tickangle: -45 }, yaxis: { title: 'Сентимент', gridcolor: '#2a2a4a', ticktext: ['Негативний', 'Нейтральний', 'Позитивний'], tickvals: [-1, 0, 1] }, title: { text: 'Динаміка сентименту', font: { color: '#e0e0e0' } } }, { responsive: true });
-                } else { document.getElementById('sentimentTrendChart').innerHTML = '<div class="loading">Немає даних для графіка тренду</div>'; }
+                } else document.getElementById('sentimentTrendChart').innerHTML = '<div class="loading">Немає даних для графіка тренду</div>';
                 const sentimentFilter = document.getElementById('newsSentimentFilter')?.value || 'all';
                 const limit = parseInt(document.getElementById('newsLimit')?.value || 15);
                 let filteredArticles = data.articles || [];
@@ -941,9 +1029,9 @@
                 const cols=Object.keys(data.rows[0]);
                 let html='<thead><tr>';
                 cols.forEach(c=>html+=`<th onclick="sortDatabaseTable('${c}')">${getTableDisplayName(c)} ${getSortIcon(c)}</th>`);
-                html+='</table></thead><tbody>';
+                html+='</tr></thead><tbody>';
                 data.rows.forEach(row=>{
-                    html+='<tr>';
+                    html+='<tr onclick="handleDbRowClick(this)" data-order-id="'+ (row.order_id || '') +'" data-symbol="'+ (row.symbol || '') +'" data-side="'+ (row.side || '') +'" data-price="'+ (row.price || 0) +'" data-quantity="'+ (row.quantity || 0) +'" data-pnl="'+ (row.pnl || 0) +'" data-opened-at="'+ (row.opened_at || '') +'" style="cursor:pointer;">';
                     cols.forEach(c=>{
                         let val=row[c], fmt=formatCellValue(c,val), cls='';
                         if(c==='side'&&val==='buy') cls='buy';
@@ -955,8 +1043,19 @@
                     html+='</tr>';
                 });
                 html+='</tbody>';
-                document.getElementById('databaseTable').innerHTML=`<td>${html}</table>`;
+                document.getElementById('databaseTable').innerHTML=`<table>${html}</table>`;
             } catch(e) { console.error(e); document.getElementById('databaseTable').innerHTML='<div class="loading">Помилка завантаження</div>'; }
+        }
+
+        function handleDbRowClick(row) {
+            const orderId = row.getAttribute('data-order-id');
+            const symbol = row.getAttribute('data-symbol');
+            const side = row.getAttribute('data-side');
+            const price = row.getAttribute('data-price');
+            const quantity = row.getAttribute('data-quantity');
+            const pnl = row.getAttribute('data-pnl');
+            const timestamp = row.getAttribute('data-opened-at');
+            if (orderId && orderId !== '') showTradeChart(orderId, symbol, side, price, quantity, pnl, timestamp);
         }
 
         function getSortIcon(col) { return currentSortColumn===col?(currentSortOrder==='desc'?'▼':'▲'):''; }
@@ -966,77 +1065,36 @@
 
         // ============= LOGS =============
         async function loadLogs() {
-    const level = document.getElementById('logLevelFilter').value;
-    const source = document.getElementById('logSourceFilter').value;
-    const limit = document.getElementById('logLimit').value;
-
-    try {
-        let url = `/api/logs_file?level=${level}&limit=${limit}`;
-        if (source && source !== 'all') {
-            url += `&strategy=${source}`;
+            const level = document.getElementById('logLevelFilter').value;
+            const source = document.getElementById('logSourceFilter').value;
+            const limit = document.getElementById('logLimit').value;
+            try {
+                let url = `/api/logs_file?level=${level}&limit=${limit}`;
+                if (source && source !== 'all') url += `&strategy=${source}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                const container = document.getElementById('logsContainer');
+                if (data.error) { container.innerHTML = `<div class="loading">❌ Помилка: ${data.error}</div>`; return; }
+                if (!data || data.length === 0) { container.innerHTML = '<div class="loading">📭 Немає логів з вибраними фільтрами</div>'; return; }
+                const grouped = {};
+                for (const log of data) { const src = log.source || 'system'; if (!grouped[src]) grouped[src] = []; grouped[src].push(log); }
+                let html = '';
+                for (const [src, logs] of Object.entries(grouped)) {
+                    const icon = getSourceIcon(src);
+                    html += `<div class="log-group"><h4>${icon} ${src.toUpperCase()}</h4><div style="margin-left: 10px;">`;
+                    for (const log of logs) {
+                        let cls = 'log-info', icon2 = '📘';
+                        if (log.level === 'WARNING') { cls = 'log-warning'; icon2 = '⚠️'; }
+                        if (log.level === 'ERROR') { cls = 'log-error'; icon2 = '❌'; }
+                        html += `<div class="log-entry ${cls}"><span style="color:#888;">${log.timestamp}</span><span class="${cls}">${icon2} [${log.level}]</span><span>${escapeHtml(log.message)}</span></div>`;
+                    }
+                    html += `</div></div>`;
+                }
+                container.innerHTML = html;
+            } catch(e) { console.error(e); document.getElementById('logsContainer').innerHTML = '<div class="loading">❌ Помилка завантаження логів</div>'; }
         }
 
-        console.log("Запит логів:", url);
-
-        const response = await fetch(url);
-        const data = await response.json();
-
-        const container = document.getElementById('logsContainer');
-
-        if (data.error) {
-            container.innerHTML = `<div class="loading">❌ Помилка: ${data.error}</div>`;
-            return;
-        }
-
-        if (!data || data.length === 0) {
-            container.innerHTML = '<div class="loading">📭 Немає логів з вибраними фільтрами</div>';
-            return;
-        }
-
-        // Групуємо за джерелом
-        const grouped = {};
-        for (const log of data) {
-            const src = log.source || 'system';
-            if (!grouped[src]) grouped[src] = [];
-            grouped[src].push(log);
-        }
-
-        let html = '';
-        for (const [src, logs] of Object.entries(grouped)) {
-            const icon = getSourceIcon(src);
-            html += `<div class="log-group">
-                        <h4>${icon} ${src.toUpperCase()}</h4>
-                        <div style="margin-left: 10px;">`;
-
-            for (const log of logs) {
-                let cls = 'log-info';
-                let icon2 = '📘';
-                if (log.level === 'WARNING') { cls = 'log-warning'; icon2 = '⚠️'; }
-                if (log.level === 'ERROR') { cls = 'log-error'; icon2 = '❌'; }
-
-                html += `<div class="log-entry ${cls}">
-                            <span style="color:#888;">${log.timestamp}</span>
-                            <span class="${cls}">${icon2} [${log.level}]</span>
-                            <span>${escapeHtml(log.message)}</span>
-                         </div>`;
-            }
-            html += `</div></div>`;
-        }
-
-        container.innerHTML = html;
-
-    } catch(e) {
-        console.error('Помилка:', e);
-        document.getElementById('logsContainer').innerHTML = '<div class="loading">❌ Помилка завантаження логів</div>';
-    }
-}
-
-        function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+        function escapeHtml(text) { if (!text) return ''; const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
         function getSourceIcon(s) { const icons={'__main__':'🐍','trading.engine':'⚙️','grid':'🎯','scalp':'⚡','news':'📰','telegram_bot':'🤖','web.app':'🌐','database.db':'🗄️','system':'🖥️'}; return icons[s]||'📋'; }
         async function clearLogs() { if(confirm('Очистити логи?')) { await fetch('/api/clear_logs',{method:'POST'}); loadLogs(); } }
 
@@ -1052,17 +1110,190 @@
             } catch(e) { console.error(e); }
         }
         async function loadElectricity() {
-    try {
-        const response = await fetch('/api/electricity');
-        const data = await response.json();
-        document.getElementById('powerCost').innerHTML = `${data.cost_uah} ₴`;
-        document.getElementById('powerEnergy').innerHTML = `${data.energy_used_kwh} кВт⋅год`;
-        document.getElementById('powerMonthly').innerHTML = `${data.monthly_cost_uah} ₴`;
-        document.getElementById('powerYearly').innerHTML = `${data.yearly_cost_uah} ₴`;
-        document.getElementById('currentPower').innerHTML = `${data.current_power} W`;
-        document.getElementById('cpuLoad').innerHTML = `${data.cpu_load}%`;
-    } catch(e) { console.error(e); }
-}
+            try {
+                const response = await fetch('/api/electricity');
+                const data = await response.json();
+                document.getElementById('powerCost').innerHTML = `${data.cost_uah} ₴`;
+                document.getElementById('powerEnergy').innerHTML = `${data.energy_used_kwh} кВт⋅год`;
+                document.getElementById('powerMonthly').innerHTML = `${data.monthly_cost_uah} ₴`;
+                document.getElementById('powerYearly').innerHTML = `${data.yearly_cost_uah} ₴`;
+                document.getElementById('currentPower').innerHTML = `${data.current_power} W`;
+                document.getElementById('cpuLoad').innerHTML = `${data.cpu_load}%`;
+            } catch(e) { console.error(e); }
+        }
+
+        // ============= ГРАФІК УГОДИ (LIGHTWEIGHT CHARTS) =============
+        let tradeChartInstance = null;
+        async function showTradeChart(orderId, symbol, side, price, quantity, pnl, timestamp) {
+            const modal = document.getElementById('tradeModal');
+            const tradeInfoDiv = document.getElementById('tradeInfo');
+            const chartContainer = document.getElementById('tradeChartContainer');
+
+            modal.style.display = 'block';
+
+            tradeInfoDiv.innerHTML = `
+                <div class="trade-info-item"><div class="trade-info-label">Ордер ID</div><div class="trade-info-value" style="font-size:12px;">${orderId.substring(0, 20)}...</div></div>
+                <div class="trade-info-item"><div class="trade-info-label">Символ</div><div class="trade-info-value">${symbol}</div></div>
+                <div class="trade-info-item"><div class="trade-info-label">Сторона</div><div class="trade-info-value ${side}">${side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</div></div>
+                <div class="trade-info-item"><div class="trade-info-label">Ціна</div><div class="trade-info-value">$${parseFloat(price).toFixed(2)}</div></div>
+                <div class="trade-info-item"><div class="trade-info-label">Кількість</div><div class="trade-info-value">${parseFloat(quantity).toFixed(6)}</div></div>
+                <div class="trade-info-item"><div class="trade-info-label">PnL</div><div class="trade-info-value ${pnl >= 0 ? 'buy' : 'sell'}">$${parseFloat(pnl || 0).toFixed(2)}</div></div>
+                <div class="trade-info-item"><div class="trade-info-label">Час</div><div class="trade-info-value">${new Date(timestamp).toLocaleString()}</div></div>
+            `;
+
+            chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...</div>';
+
+            try {
+                const response = await fetch(`/api/trade_chart/${orderId}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    chartContainer.innerHTML = `<div class="loading-chart">❌ ${data.error}</div>`;
+                    return;
+                }
+
+                if (!data.klines || data.klines.length === 0) {
+                    chartContainer.innerHTML = '<div class="loading-chart">📭 Немає даних для цієї угоди</div>';
+                    return;
+                }
+
+                // Будуємо простий лінійний графік замість свічок
+                const timestamps = data.klines.map(k => {
+                    const d = new Date(k.timestamp);
+                    return d.toLocaleString();
+                });
+                const prices = data.klines.map(k => k.close);
+
+                // Лінія ціни
+                const priceTrace = {
+                    x: timestamps,
+                    y: prices,
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: 'Ціна',
+                    line: { color: '#00d4ff', width: 2 },
+                    fill: 'tozeroy',
+                    fillcolor: 'rgba(0, 212, 255, 0.1)'
+                };
+
+                const traces = [priceTrace];
+
+                // Точка входу
+                const entryTime = new Date(data.entry_point.timestamp).toLocaleString();
+                const entryPrice = data.entry_point.price;
+
+                traces.push({
+                    x: [entryTime],
+                    y: [entryPrice],
+                    type: 'scatter',
+                    mode: 'markers+text',
+                    name: '🟢 ВХІД',
+                    marker: { color: '#00ff88', size: 16, symbol: 'circle', line: { color: 'white', width: 2 } },
+                    text: [`💰 $${entryPrice.toFixed(2)}`],
+                    textposition: 'top center',
+                    textfont: { color: '#00ff88', size: 10, weight: 'bold' }
+                });
+
+                // Точка виходу (якщо є)
+                if (data.exit_point) {
+                    const exitTime = new Date(data.exit_point.timestamp).toLocaleString();
+                    const exitPrice = data.exit_point.price;
+                    const pnlPercent = ((exitPrice - entryPrice) / entryPrice * 100).toFixed(2);
+
+                    traces.push({
+                        x: [exitTime],
+                        y: [exitPrice],
+                        type: 'scatter',
+                        mode: 'markers+text',
+                        name: '🔴 ВИХІД',
+                        marker: { color: '#ff4444', size: 16, symbol: 'circle', line: { color: 'white', width: 2 } },
+                        text: [`💸 $${exitPrice.toFixed(2)} (${pnlPercent}%)`],
+                        textposition: 'bottom center',
+                        textfont: { color: '#ff4444', size: 10, weight: 'bold' }
+                    });
+
+                    // Лінія з'єднання
+                    traces.push({
+                        x: [entryTime, exitTime],
+                        y: [entryPrice, exitPrice],
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: '📈 Тренд',
+                        line: { color: pnlPercent >= 0 ? '#00ff88' : '#ff4444', width: 2, dash: 'dash' }
+                    });
+                }
+
+                // Знаходимо межі для масштабування
+                const allPrices = [...prices, entryPrice];
+                if (data.exit_point) allPrices.push(data.exit_point.price);
+                const minPrice = Math.min(...allPrices) * 0.998;
+                const maxPrice = Math.max(...allPrices) * 1.002;
+
+                const layout = {
+                    title: {
+                        text: `${symbol} — ${data.exit_point ? 'Закрита угода' : 'Відкрита угода'}`,
+                        font: { color: '#e0e0e0', size: 14 }
+                    },
+                    paper_bgcolor: '#1a1a2e',
+                    plot_bgcolor: '#1a1a2e',
+                    font: { color: '#e0e0e0' },
+                    xaxis: {
+                        title: 'Час',
+                        gridcolor: '#2a2a4a',
+                        tickangle: -45,
+                        type: 'category'
+                    },
+                    yaxis: {
+                        title: 'Ціна (USDT)',
+                        gridcolor: '#2a2a4a',
+                        range: [minPrice, maxPrice],
+                        tickformat: '.2f'
+                    },
+                    hovermode: 'x unified',
+                    showlegend: true,
+                    legend: {
+                        x: 0.02,
+                        y: 0.98,
+                        bgcolor: 'rgba(0,0,0,0.6)',
+                        font: { color: '#e0e0e0', size: 10 }
+                    },
+                    margin: { l: 70, r: 40, t: 50, b: 100 },
+                    height: 450,
+                    autosize: true
+                };
+
+                Plotly.newPlot(chartContainer, traces, layout, { responsive: true });
+
+            } catch(e) {
+                console.error('Помилка завантаження графіка:', e);
+                chartContainer.innerHTML = '<div class="loading-chart">❌ Помилка завантаження графіка</div>';
+            }
+        }
+
+        function closeTradeModal() {
+            const modal = document.getElementById('tradeModal');
+            if (modal) modal.style.display = 'none';
+            const chartContainer = document.getElementById('tradeChartContainer');
+            if (chartContainer) chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...</div>';
+        }
+
+        window.onclick = function(event) {
+            const modal = document.getElementById('tradeModal');
+            if (event.target === modal) closeTradeModal();
+        }
+
+        function closeTradeModal() {
+            const modal = document.getElementById('tradeModal');
+            if (modal) modal.style.display = 'none';
+            const chartContainer = document.getElementById('tradeChartContainer');
+            if (chartContainer) chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...</div>';
+        }
+
+        window.onclick = function(event) {
+            const modal = document.getElementById('tradeModal');
+            if (event.target === modal) closeTradeModal();
+        }
+
 
         // ============= ACTIONS =============
         async function toggleStrategy(id) { await fetch(`/api/strategy/${id}/toggle`,{method:'POST'}); loadAllData(); loadGridStrategy(); loadScalpStrategy(); }
@@ -1076,6 +1307,124 @@
             const sensitivity=document.getElementById('newsSensitivity').value;
             fetch('/api/news_settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbols:symbols,interval_minutes:interval,sensitivity:sensitivity})})
                 .then(r=>r.json()).then(data=>{ if(data.success) { alert('Збережено!'); loadNewsStrategy(); } else alert('Помилка'); }).catch(e=>alert(e));
+        }
+
+        // ============= БЕКТЕСТИНГ =============
+        function setDefaultBacktestDates() {
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+            document.getElementById('backtestStartDate').value = startDate.toISOString().split('T')[0];
+            document.getElementById('backtestEndDate').value = endDate.toISOString().split('T')[0];
+        }
+        function setBacktestRange(days) {
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+            document.getElementById('backtestStartDate').value = startDate.toISOString().split('T')[0];
+            document.getElementById('backtestEndDate').value = endDate.toISOString().split('T')[0];
+        }
+        async function runBacktest() {
+            const symbol = document.getElementById('backtestSymbol').value;
+            const interval = document.getElementById('backtestInterval').value;
+            const initialBalance = parseFloat(document.getElementById('backtestBalance').value);
+            const gridLevels = parseInt(document.getElementById('backtestGridLevels').value);
+            const orderSize = parseFloat(document.getElementById('backtestOrderSize').value);
+            const lowerPercent = parseFloat(document.getElementById('backtestLowerPercent').value);
+            const upperPercent = parseFloat(document.getElementById('backtestUpperPercent').value);
+            const startDate = document.getElementById('backtestStartDate').value;
+            const endDate = document.getElementById('backtestEndDate').value;
+            if (!startDate || !endDate) { alert('Виберіть дати'); return; }
+            const startDateTime = startDate + 'T00:00:00';
+            const endDateTime = endDate + 'T23:59:59';
+            document.getElementById('backtestProgress').style.display = 'block';
+            document.getElementById('backtestResults').style.display = 'none';
+            document.getElementById('optimizationResults').style.display = 'none';
+            try {
+                const response = await fetch('/api/backtest/grid', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol, start_date: startDateTime, end_date: endDateTime, initial_balance: initialBalance, grid_levels: gridLevels, order_size_usdt: orderSize, lower_percent: lowerPercent, upper_percent: upperPercent, interval })
+                });
+                const result = await response.json();
+                if (result.error) { alert('Помилка: ' + result.error); return; }
+                displayBacktestResults(result);
+            } catch(e) { console.error(e); alert('Помилка: ' + e.message); } finally { document.getElementById('backtestProgress').style.display = 'none'; }
+        }
+        function displayBacktestResults(result) {
+            document.getElementById('backtestResults').style.display = 'block';
+            const pnlClass = result.total_pnl >= 0 ? 'stat-positive' : 'stat-negative';
+            document.getElementById('backtestStats').innerHTML = `
+                <div class="stat-card"><div class="stat-value">$${result.initial_balance}</div><div class="stat-label">Початковий баланс</div></div>
+                <div class="stat-card"><div class="stat-value">$${result.final_balance}</div><div class="stat-label">Кінцевий баланс</div></div>
+                <div class="stat-card"><div class="stat-value ${pnlClass}">$${result.total_pnl}</div><div class="stat-label">Загальний PnL</div></div>
+                <div class="stat-card"><div class="stat-value ${pnlClass}">${result.total_pnl_percent}%</div><div class="stat-label">PnL %</div></div>
+                <div class="stat-card"><div class="stat-value">${result.total_trades}</div><div class="stat-label">Всього угод</div></div>
+                <div class="stat-card"><div class="stat-value">${result.win_rate}%</div><div class="stat-label">Win Rate</div></div>
+                <div class="stat-card"><div class="stat-value">${result.max_drawdown}%</div><div class="stat-label">Max Drawdown</div></div>
+                <div class="stat-card"><div class="stat-value">${result.sharpe_ratio}</div><div class="stat-label">Sharpe Ratio</div></div>
+            `;
+            const trace = { x: ['Початковий', 'Кінцевий'], y: [result.initial_balance, result.final_balance], type: 'bar', marker: { color: result.total_pnl >= 0 ? '#00ff88' : '#ff4444' }, text: [`$${result.initial_balance}`, `$${result.final_balance}`], textposition: 'auto' };
+            Plotly.newPlot('backtestChart', [trace], { title: 'Зміна балансу', paper_bgcolor: '#1a1a2e', plot_bgcolor: '#1a1a2e', font: { color: '#e0e0e0' }, yaxis: { title: 'Баланс (USDT)' } }, { responsive: true });
+            document.getElementById('backtestOrders').innerHTML = `<div class="loading">✅ Бектест завершено<br>📊 Всього угод: ${result.total_trades}<br>🏆 Win Rate: ${result.win_rate}%<br>📉 Max Drawdown: ${result.max_drawdown}%<br>📈 Sharpe Ratio: ${result.sharpe_ratio}</div>`;
+        }
+        async function runOptimization() {
+            const symbol = document.getElementById('backtestSymbol').value;
+            const startDate = document.getElementById('backtestStartDate').value;
+            const endDate = document.getElementById('backtestEndDate').value;
+            const initialBalance = parseFloat(document.getElementById('backtestBalance').value);
+            if (!startDate || !endDate) { alert('Виберіть дати'); return; }
+            const startDateTime = startDate + 'T00:00:00';
+            const endDateTime = endDate + 'T23:59:59';
+            const daysDiff = (new Date(endDate) - new Date(startDate)) / (1000 * 3600 * 24);
+            if (daysDiff > 30 && !confirm(`Оптимізація на періоді ${daysDiff} днів може зайняти багато часу (до 5 хвилин). Продовжити?`)) return;
+            document.getElementById('backtestProgress').style.display = 'block';
+            document.getElementById('optimizationResults').style.display = 'none';
+            document.getElementById('backtestResults').style.display = 'none';
+            try {
+                const response = await fetch('/api/backtest/grid/optimize', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol, start_date: startDateTime, end_date: endDateTime, initial_balance: initialBalance })
+                });
+                const data = await response.json();
+                if (data.error) { alert('Помилка: ' + data.error); return; }
+                displayOptimizationResults(data.results);
+            } catch(e) { console.error(e); alert('Помилка: ' + e.message); } finally { document.getElementById('backtestProgress').style.display = 'none'; }
+        }
+        function displayOptimizationResults(results) {
+            document.getElementById('optimizationResults').style.display = 'block';
+            if (!results || results.length === 0) { document.getElementById('optimizationTable').innerHTML = '<div class="loading">Немає результатів</div>'; return; }
+            let html = `<table><thead><tr><th>Ранг</th><th>Рівнів</th><th>Розмір</th><th>Нижній%</th><th>Верхній%</th><th>PnL</th><th>PnL%</th><th>Угоди</th><th>WinRate</th><th>Drawdown</th><th>Sharpe</th></tr></thead><tbody>`;
+            results.forEach((r, idx) => {
+                const pnlClass = r.total_pnl >= 0 ? 'stat-positive' : 'stat-negative';
+                html += `<tr><td><strong>#${idx + 1}</strong></td><td>${r.grid_levels}</td><td>$${r.order_size_usdt}</td><td>${r.lower_percent}%</td><td>${r.upper_percent}%</td><td class="${pnlClass}">$${r.total_pnl.toFixed(2)}</td><td class="${pnlClass}">${r.total_pnl_percent.toFixed(2)}%</td><td>${r.total_trades}</td><td>${r.win_rate.toFixed(1)}%</td><td class="stat-negative">${r.max_drawdown.toFixed(2)}%</td><td>${r.sharpe_ratio.toFixed(2)}</td></tr>`;
+            });
+            html += `</tbody></tr>`;
+            document.getElementById('optimizationTable').innerHTML = html;
+        }
+        setDefaultBacktestDates();
+
+        // ============= МЕТРИКИ =============
+        async function loadMetrics() {
+            try {
+                const response = await fetch('/api/metrics');
+                const metrics = await response.json();
+                if (metrics.system_cpu_usage_percent) document.getElementById('metricsCpu').innerHTML = metrics.system_cpu_usage_percent[0]?.value.toFixed(1) + '%' || '-';
+                if (metrics.system_ram_usage_percent) document.getElementById('metricsRam').innerHTML = metrics.system_ram_usage_percent[0]?.value.toFixed(1) + '%' || '-';
+                if (metrics.system_uptime_seconds) {
+                    const uptimeSec = metrics.system_uptime_seconds[0]?.value || 0;
+                    const hours = Math.floor(uptimeSec / 3600), minutes = Math.floor((uptimeSec % 3600) / 60);
+                    document.getElementById('metricsUptime').innerHTML = `${hours}г ${minutes}х`;
+                }
+                let html = '<div class="settings-panel"><h3>📊 Всі метрики</h3><div class="orders-table"><table><thead><tr><th>Метрика</th><th>Значення</th><th>Мітки</th></tr></thead><tbody>';
+                for (const [metricName, samples] of Object.entries(metrics)) {
+                    for (const sample of samples) {
+                        const labels = Object.entries(sample.labels).map(([k, v]) => `${k}=${v}`).join(', ');
+                        html += `<tr><td><code>${sample.name}</code></td><td><strong>${typeof sample.value === 'number' ? sample.value.toFixed(4) : sample.value}</strong></td><td style="font-size: 11px; color: #888;">${labels || '-'}</td></tr>`;
+                    }
+                }
+                html += `</tbody></table></div></div>`;
+                document.getElementById('metricsContainer').innerHTML = html;
+            } catch(e) { console.error(e); document.getElementById('metricsContainer').innerHTML = '<div class="loading">Помилка завантаження метрик</div>'; }
         }
 
         loadAllData(); loadSystemStatus(); loadElectricity(); loadMode(); loadRealBalance();

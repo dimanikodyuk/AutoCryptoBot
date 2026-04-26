@@ -45,6 +45,9 @@ class NewsStrategy(BaseStrategy):
     def available_balance(self):
         return self.balance - self.locked_balance
 
+    def get_current_balance(self) -> float:
+        return self.balance
+
     def _load_api_key(self):
         env_path = Path(__file__).parent.parent.parent / '.env'
         if env_path.exists():
@@ -80,22 +83,27 @@ class NewsStrategy(BaseStrategy):
 
     def _load_history(self):
         with get_db() as conn:
-            bal = conn.execute("SELECT amount FROM balances WHERE strategy_id=? AND asset='USDT' AND symbol IS NULL", (self.strategy_id,)).fetchone()
+            bal = conn.execute("SELECT amount FROM balances WHERE strategy_id=? AND asset='USDT' AND symbol IS NULL",
+                               (self.strategy_id,)).fetchone()
             if bal:
                 self.balance = bal['amount']
             else:
                 self.balance = 100.0
                 self._save_balance()
-            stats = conn.execute("SELECT SUM(pnl) as pnl, COUNT(*) as cnt FROM orders WHERE strategy_id=? AND status='closed'", (self.strategy_id,)).fetchone()
+            stats = conn.execute(
+                "SELECT SUM(pnl) as pnl, COUNT(*) as cnt FROM orders WHERE strategy_id=? AND status='closed'",
+                (self.strategy_id,)).fetchone()
             if stats and stats['pnl']:
                 self.total_pnl = stats['pnl']
                 self.total_trades = stats['cnt']
-            win = conn.execute("SELECT COUNT(*) FROM orders WHERE strategy_id=? AND status='closed' AND pnl>0", (self.strategy_id,)).fetchone()
+            win = conn.execute("SELECT COUNT(*) FROM orders WHERE strategy_id=? AND status='closed' AND pnl>0",
+                               (self.strategy_id,)).fetchone()
             self.winning_trades = win[0] if win else 0
 
     def _save_balance(self):
         with get_db() as conn:
-            conn.execute("DELETE FROM balances WHERE strategy_id=? AND asset='USDT' AND symbol IS NULL", (self.strategy_id,))
+            conn.execute("DELETE FROM balances WHERE strategy_id=? AND asset='USDT' AND symbol IS NULL",
+                         (self.strategy_id,))
             conn.execute("INSERT INTO balances (strategy_id, asset, amount, mode, updated_at) VALUES (?,?,?,?,?)",
                          (self.strategy_id, 'USDT', self.balance, self.mode, datetime.now().isoformat()))
 
@@ -120,28 +128,43 @@ class NewsStrategy(BaseStrategy):
             return []
 
     def analyze_sentiment(self, articles: List[dict]) -> dict:
-        pos_kw = ['surge', 'rally', 'gain', 'positive', 'bullish', 'record', 'high', 'upgrade', 'approve', 'adoption', 'breakthrough', 'soar', 'pump', 'moon', 'green', 'up', 'growth']
-        neg_kw = ['drop', 'crash', 'fall', 'negative', 'bearish', 'low', 'decline', 'hack', 'ban', 'scandal', 'fraud', 'crackdown', 'dump', 'red', 'sell', 'panic', 'fud', 'down']
+        pos_kw = ['surge', 'rally', 'gain', 'positive', 'bullish', 'record', 'high', 'upgrade', 'approve', 'adoption',
+                  'breakthrough', 'soar', 'pump', 'moon', 'green', 'up', 'growth']
+        neg_kw = ['drop', 'crash', 'fall', 'negative', 'bearish', 'low', 'decline', 'hack', 'ban', 'scandal', 'fraud',
+                  'crackdown', 'dump', 'red', 'sell', 'panic', 'fud', 'down']
         pos = neg = neu = 0
         for a in articles[:20]:
-            text = (a.get('title','') + ' ' + (a.get('description','') or '')).lower()
+            text = (a.get('title', '') + ' ' + (a.get('description', '') or '')).lower()
             p = sum(1 for kw in pos_kw if kw in text)
             n = sum(1 for kw in neg_kw if kw in text)
-            if p > n: pos += 1
-            elif n > p: neg += 1
-            else: neu += 1
-        total = pos+neg+neu
+            if p > n:
+                pos += 1
+            elif n > p:
+                neg += 1
+            else:
+                neu += 1
+        total = pos + neg + neu
         if total == 0:
-            return {'overall': 'neutral', 'positive':0, 'neutral':0, 'negative':0}
-        if pos > neg+2: overall='positive'
-        elif neg > pos+2: overall='negative'
-        else: overall='neutral'
+            return {'overall': 'neutral', 'positive': 0, 'neutral': 0, 'negative': 0}
+        if pos > neg + 2:
+            overall = 'positive'
+        elif neg > pos + 2:
+            overall = 'negative'
+        else:
+            overall = 'neutral'
         return {'overall': overall, 'positive': pos, 'neutral': neu, 'negative': neg}
 
     async def analyze(self):
         if not self.enabled:
-            return {'action':'hold'}
-        need_update = (self.last_update is None or (datetime.now()-self.last_update).seconds > self.interval_minutes*60)
+            return {'action': 'hold'}
+
+        # Перевірка лімітів
+        if not self.can_trade():
+            logger.warning(f"[News] Торгівля заблокована: {self._block_reason}")
+            return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
+
+        need_update = (self.last_update is None or (
+                    datetime.now() - self.last_update).seconds > self.interval_minutes * 60)
         if need_update:
             logger.info("Оновлення новин...")
             articles = await self.fetch_news()
@@ -150,21 +173,25 @@ class NewsStrategy(BaseStrategy):
             if articles:
                 sent = self.analyze_sentiment(articles)
                 self.current_sentiment = sent['overall']
-                self.sentiment_history.append({'timestamp': datetime.now().isoformat(), 'overall': self.current_sentiment, **sent})
-                if len(self.sentiment_history)>50: self.sentiment_history = self.sentiment_history[-50:]
-                add_log("INFO", self.name, f"Сентимент: {self.current_sentiment} (поз:{sent['positive']}, нег:{sent['negative']})")
+                self.sentiment_history.append(
+                    {'timestamp': datetime.now().isoformat(), 'overall': self.current_sentiment, **sent})
+                if len(self.sentiment_history) > 50: self.sentiment_history = self.sentiment_history[-50:]
+                add_log("INFO", self.name,
+                        f"Сентимент: {self.current_sentiment} (поз:{sent['positive']}, нег:{sent['negative']})")
                 signal = self._generate_signal(sent)
                 return signal
-        return {'action':'hold', 'sentiment':self.current_sentiment}
+        return {'action': 'hold', 'sentiment': self.current_sentiment}
 
     def _generate_signal(self, sent):
-        mult = {'low':2.0, 'medium':1.5, 'high':1.0}[self.sensitivity]
-        thresh = int(4*mult)
+        mult = {'low': 2.0, 'medium': 1.5, 'high': 1.0}[self.sensitivity]
+        thresh = int(4 * mult)
         if sent['positive'] > sent['negative'] + thresh and sent['positive'] >= 3:
-            return {'action':'buy', 'reason':'positive_news'}
+            self.increment_daily_trades()
+            return {'action': 'buy', 'reason': 'positive_news'}
         elif sent['negative'] > sent['positive'] + thresh and sent['negative'] >= 3:
-            return {'action':'sell', 'reason':'negative_news'}
-        return {'action':'hold'}
+            self.increment_daily_trades()
+            return {'action': 'sell', 'reason': 'negative_news'}
+        return {'action': 'hold'}
 
     async def execute(self, signal):
         if signal.get('action') == 'buy':
@@ -173,17 +200,22 @@ class NewsStrategy(BaseStrategy):
             add_log("INFO", self.name, "Сигнал ПРОДАЖУ (негативні новини)")
 
     async def get_status(self):
-        win_rate = (self.winning_trades/self.total_trades*100) if self.total_trades else 0
+        win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades else 0
         return {
             'id': self.strategy_id, 'name': self.name, 'enabled': self.enabled, 'mode': self.mode,
-            'balance': round(self.balance,2), 'locked_balance': round(self.locked_balance,2),
-            'available_balance': round(self.available_balance,2),
-            'total_pnl': round(self.total_pnl,2), 'total_trades': self.total_trades,
-            'winning_trades': self.winning_trades, 'win_rate': round(win_rate,1),
+            'balance': round(self.balance, 2), 'locked_balance': round(self.locked_balance, 2),
+            'available_balance': round(self.available_balance, 2),
+            'total_pnl': round(self.total_pnl, 2), 'total_trades': self.total_trades,
+            'winning_trades': self.winning_trades, 'win_rate': round(win_rate, 1),
             'current_sentiment': self.current_sentiment, 'symbols': self.symbols,
             'interval_minutes': self.interval_minutes, 'sensitivity': self.sensitivity,
             'last_news_count': self.articles_count, 'api_key_configured': bool(self.news_api_key),
-            'sentiment_history': self.sentiment_history
+            'sentiment_history': self.sentiment_history,
+            # Ліміти
+            'daily_trades_count': self.daily_trades_count,
+            'max_daily_trades': self.max_daily_trades,
+            'is_blocked': self._is_blocked,
+            'block_reason': self._block_reason
         }
 
     async def reset(self):
@@ -200,6 +232,10 @@ class NewsStrategy(BaseStrategy):
             conn.execute("DELETE FROM orders WHERE strategy_id=?", (self.strategy_id,))
             conn.execute("DELETE FROM balances WHERE strategy_id=?", (self.strategy_id,))
         self._save_balance()
+
+        # Скидаємо ліміти
+        await self.reset_limits()
+
         add_log("INFO", self.name, "Стратегію скинуто")
 
     async def emergency_stop(self):

@@ -22,9 +22,10 @@
     "scalp": {
         "symbols": [
             "BTCUSDT",
-            "SOLUSDT"
+            "SOLUSDT",
+            "ETHUSDT"
         ],
-        "trade_size_usdt": 20,
+        "trade_size_usdt": 50,
         "take_profit_percent": 0.5,
         "stop_loss_percent": 0.25,
         "trailing_stop_percent": 0.3,

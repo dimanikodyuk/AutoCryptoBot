@@ -137,13 +137,21 @@ class GridStrategy(BaseStrategy):
     async def analyze(self):
         if not self.enabled:
             return {'action': 'hold'}
+
+        # Перевірка лімітів
+        if not self.can_trade():
+            logger.warning(f"[Grid] Торгівля заблокована: {self._block_reason}")
+            return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
+
         for sym, grid in self.grids.items():
             price = await self.exchange.get_current_price(sym)
             if price > 0:
                 await grid.update_price(price)
+
         self.total_pnl = sum(g.total_pnl for g in self.grids.values())
         self.total_trades = sum(g.total_trades for g in self.grids.values())
         self.winning_trades = sum(g.winning_trades for g in self.grids.values())
+
         return {'action': 'hold'}
 
     async def execute(self, signal: dict):
@@ -171,8 +179,16 @@ class GridStrategy(BaseStrategy):
             'default_grid_levels': self.default_grid_levels,
             'default_order_size_usdt': self.default_order_size_usdt,
             'default_lower_percent': self.default_lower_percent,
-            'default_upper_percent': self.default_upper_percent
+            'default_upper_percent': self.default_upper_percent,
+            # Ліміти
+            'daily_trades_count': self.daily_trades_count,
+            'max_daily_trades': self.max_daily_trades,
+            'is_blocked': self._is_blocked,
+            'block_reason': self._block_reason
         }
+
+    def get_current_balance(self) -> float:
+        return self.total_balance
 
     async def get_grid_levels_for_symbol(self, symbol: str):
         if symbol in self.grids:
@@ -236,6 +252,10 @@ class GridStrategy(BaseStrategy):
             conn.execute("DELETE FROM orders WHERE strategy_id=?", (self.strategy_id,))
             conn.execute("DELETE FROM balances WHERE strategy_id=?", (self.strategy_id,))
         self._save_balance()
+
+        # Скидаємо ліміти
+        await self.reset_limits()
+
         add_log("INFO", self.name, "Стратегію скинуто")
         logger.info(f"GridStrategy: повне скидання виконано")
 
