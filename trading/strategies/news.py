@@ -183,15 +183,37 @@ class NewsStrategy(BaseStrategy):
         return {'action': 'hold', 'sentiment': self.current_sentiment}
 
     def _generate_signal(self, sent):
-        mult = {'low': 2.0, 'medium': 1.5, 'high': 1.0}[self.sensitivity]
-        thresh = int(4 * mult)
+        mult = {'low':2.0, 'medium':1.5, 'high':1.0}[self.sensitivity]
+        thresh = int(4*mult)
         if sent['positive'] > sent['negative'] + thresh and sent['positive'] >= 3:
+            # ============= ТЕЛЕГРАМ СПОВІЩЕННЯ =============
+            if self.telegram_bot:
+                asyncio.create_task(
+                    self.telegram_bot.send_notification(
+                        f"📰 *НОВИННИЙ СИГНАЛ*\n"
+                        f"└ Дія: `КУПІВЛЯ`\n"
+                        f"└ Причина: позитивні новини\n"
+                        f"└ Позитивних: {sent['positive']}, Негативних: {sent['negative']}",
+                        parse_mode='Markdown'
+                    )
+                )
             self.increment_daily_trades()
-            return {'action': 'buy', 'reason': 'positive_news'}
+            return {'action':'buy', 'reason':'positive_news'}
         elif sent['negative'] > sent['positive'] + thresh and sent['negative'] >= 3:
+            # ============= ТЕЛЕГРАМ СПОВІЩЕННЯ =============
+            if self.telegram_bot:
+                asyncio.create_task(
+                    self.telegram_bot.send_notification(
+                        f"📰 *НОВИННИЙ СИГНАЛ*\n"
+                        f"└ Дія: `ПРОДАЖ`\n"
+                        f"└ Причина: негативні новини\n"
+                        f"└ Позитивних: {sent['positive']}, Негативних: {sent['negative']}",
+                        parse_mode='Markdown'
+                    )
+                )
             self.increment_daily_trades()
-            return {'action': 'sell', 'reason': 'negative_news'}
-        return {'action': 'hold'}
+            return {'action':'sell', 'reason':'negative_news'}
+        return {'action':'hold'}
 
     async def execute(self, signal):
         if signal.get('action') == 'buy':

@@ -592,7 +592,6 @@ class ScalpStrategy(BaseStrategy):
 
     async def _open_position(self, symbol: str, price: float, strong: bool = False):
         quantity = self.trade_size_usdt / price
-
         cost = quantity * price
 
         if self.available_balance < cost:
@@ -621,7 +620,17 @@ class ScalpStrategy(BaseStrategy):
         signal_type = "🔥 СИЛЬНИЙ СИГНАЛ" if strong else "✅ Звичайний сигнал"
         add_log("INFO", self.name, f"📈 Відкрито LONG позицію {symbol} @ ${price:.2f} ({signal_type})")
 
-        # Оновлюємо лічильники
+        # ============= НОВЕ: ТЕЛЕГРАМ СПОВІЩЕННЯ =============
+        if self.telegram_bot:
+            await self.telegram_bot.send_notification(
+                f"📈 *ВІДКРИТО ПОЗИЦІЮ* (Scalp)\n"
+                f"└ Пара: `{symbol}`\n"
+                f"└ Ціна: `${price:.2f}`\n"
+                f"└ Розмір: `{quantity:.6f}`\n"
+                f"└ Сигнал: {signal_type}",
+                parse_mode='Markdown'
+            )
+
         self.increment_daily_trades()
         self.update_balance_for_drawdown()
 
@@ -651,12 +660,19 @@ class ScalpStrategy(BaseStrategy):
         else:
             self.losing_trades += 1
 
-        self._update_order(position['order_id'], pnl=pnl, commission=commission, status='closed')
+        # Оновлюємо статус ордера з ціною закриття
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE orders SET status = 'closed', closed_at = ?, closed_price = ?, pnl = ?, commission = ? WHERE order_id = ?",
+                (datetime.now().isoformat(), price, pnl, commission, position['order_id'])
+            )
 
         reason_text = {
             'take_profit': '🎯 Take Profit',
             'stop_loss': '🛑 Stop Loss',
-            'trailing_stop': '📉 Trailing Stop'
+            'trailing_stop': '📉 Trailing Stop',
+            'emergency_stop': '🛑 Екстрена зупинка',
+            'reset': '🔄 Скидання'
         }.get(reason, reason)
 
         del self.open_positions[symbol]
@@ -664,7 +680,19 @@ class ScalpStrategy(BaseStrategy):
         add_log("INFO", self.name,
                 f"📉 Закрито LONG позицію {symbol} @ ${price:.2f} | PnL: ${pnl:.2f} | {reason_text}")
 
-        # Оновлюємо drawdown
+        # ============= НОВЕ: ТЕЛЕГРАМ СПОВІЩЕННЯ =============
+        if self.telegram_bot:
+            pnl_icon = "✅" if pnl >= 0 else "❌"
+            await self.telegram_bot.send_notification(
+                f"📉 *ЗАКРИТО ПОЗИЦІЮ* (Scalp)\n"
+                f"└ Пара: `{symbol}`\n"
+                f"└ Ціна входу: `${position['entry_price']:.2f}`\n"
+                f"└ Ціна виходу: `${price:.2f}`\n"
+                f"└ PnL: {pnl_icon} `${pnl:.2f}`\n"
+                f"└ Причина: {reason_text}",
+                parse_mode='Markdown'
+            )
+
         self.update_balance_for_drawdown()
 
     async def get_status(self) -> dict:

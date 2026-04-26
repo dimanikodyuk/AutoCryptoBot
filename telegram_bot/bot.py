@@ -112,6 +112,7 @@ class TelegramBot:
     # ============= СПОВІЩЕННЯ =============
 
     async def send_notification(self, message: str, parse_mode: str = None):
+        """Відправка сповіщення в Telegram"""
         if self.chat_id and self.application and self._running:
             try:
                 await self.application.bot.send_message(
@@ -119,6 +120,7 @@ class TelegramBot:
                     text=message,
                     parse_mode=parse_mode
                 )
+                logger.info(f"Сповіщення відправлено: {message[:50]}...")
             except Exception as e:
                 logger.error(f"Помилка відправки сповіщення: {e}")
 

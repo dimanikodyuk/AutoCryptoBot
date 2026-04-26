@@ -160,102 +160,96 @@ def create_flask_app(config, trading_engine):
                 order = cursor.fetchone()
 
                 if not order:
-                    logger.error(f"Ордер не знайдено: {order_id}")
                     return jsonify({'error': 'Order not found'}), 404
 
                 order_dict = dict(order)
+                strategy_name = order_dict.get('strategy_name', 'unknown')
+
                 logger.info(
-                    f"Знайдено ордер: side={order_dict['side']}, symbol={order_dict['symbol']}, status={order_dict['status']}")
+                    f"Знайдено ордер: strategy={strategy_name}, side={order_dict['side']}, status={order_dict['status']}")
 
-                # Шукаємо парний ордер
                 pair_order = None
-
-                # Якщо є pair_id
-                if order_dict.get('pair_id'):
-                    cursor = conn.execute(
-                        "SELECT * FROM orders WHERE pair_id = ? AND order_id != ?",
-                        (order_dict['pair_id'], order_id)
-                    )
-                    pair_order = cursor.fetchone()
-                    if pair_order:
-                        pair_order = dict(pair_order)
-                        logger.info(f"Знайдено парний ордер по pair_id: {pair_order['order_id']}")
-
-                # Якщо не знайшли - шукаємо за часом
-                if not pair_order and order_dict['status'] == 'closed':
-                    cursor = conn.execute(
-                        "SELECT * FROM orders WHERE strategy_id = ? AND symbol = ? AND status = 'closed' "
-                        "AND side != ? ORDER BY opened_at DESC LIMIT 1",
-                        (order_dict['strategy_id'], order_dict['symbol'], order_dict['side'])
-                    )
-                    pair_order = cursor.fetchone()
-                    if pair_order:
-                        pair_order = dict(pair_order)
-                        logger.info(f"Знайдено парний ордер пошуком: {pair_order['order_id']}")
-
-                # Визначаємо точки
-                entry_point = {
-                    'price': order_dict['price'],
-                    'timestamp': order_dict['opened_at'],
-                    'quantity': order_dict['quantity']
-                }
-
+                entry_point = None
                 exit_point = None
-                if pair_order and pair_order['side'] != order_dict['side']:
-                    exit_point = {
-                        'price': pair_order['price'],
-                        'timestamp': pair_order['opened_at'],
-                        'quantity': pair_order['quantity']
+
+                # Для скальпінгу - це одиночний ордер, точка виходу - це закриття цього ж ордера
+                if strategy_name == 'scalp':
+                    entry_point = {
+                        'price': order_dict['price'],
+                        'timestamp': order_dict['opened_at'],
+                        'quantity': order_dict['quantity']
                     }
-                    logger.info(f"Точка виходу: price={exit_point['price']}, time={exit_point['timestamp']}")
+
+                    # Если ордер закрыт - точка выхода это закрытие
+                    if order_dict['status'] == 'closed' and order_dict.get('closed_at'):
+                        exit_point = {
+                            'price': order_dict['price'],  # Цена закрытия та же, что и цена открытия? НЕТ!
+                            # В скальпинге цена закрытия - это рыночная цена в момент закрытия
+                            # Нужно хранить цену закрытия в отдельном поле
+                            'timestamp': order_dict['closed_at'],
+                            'quantity': order_dict['quantity']
+                        }
+                        logger.info(f"Скальпінг: угода закрита в {exit_point['timestamp']}")
+                    else:
+                        logger.info(f"Скальпінг: угода ще відкрита")
+
+                else:
+                    # Для Grid - ищем парный ордер
+                    if order_dict.get('pair_id'):
+                        cursor = conn.execute(
+                            "SELECT * FROM orders WHERE pair_id = ? AND order_id != ?",
+                            (order_dict['pair_id'], order_id)
+                        )
+                        pair_order = cursor.fetchone()
+                        if pair_order:
+                            pair_order = dict(pair_order)
+
+                    if order_dict['side'] == 'buy':
+                        entry_point = {
+                            'price': order_dict['price'],
+                            'timestamp': order_dict['opened_at'],
+                            'quantity': order_dict['quantity']
+                        }
+                        if pair_order and pair_order['side'] == 'sell':
+                            exit_point = {
+                                'price': pair_order['price'],
+                                'timestamp': pair_order['opened_at'],
+                                'quantity': pair_order['quantity']
+                            }
+                    else:
+                        entry_point = {
+                            'price': order_dict['price'],
+                            'timestamp': order_dict['opened_at'],
+                            'quantity': order_dict['quantity']
+                        }
+                        if pair_order and pair_order['side'] == 'buy':
+                            exit_point = {
+                                'price': pair_order['price'],
+                                'timestamp': pair_order['opened_at'],
+                                'quantity': pair_order['quantity']
+                            }
 
                 symbol = order_dict['symbol']
 
-                # Отримуємо свічки - використовуємо більший ліміт
+                # Получаем свечи
                 from datetime import datetime
-                import time as time_module
-
-                # Конвертуємо timestamp
                 entry_dt = datetime.fromisoformat(entry_point['timestamp'])
-                start_ts = int(entry_dt.timestamp() * 1000) - 3600000  # 1 година до входу
+                start_ts = int(entry_dt.timestamp() * 1000) - 3600000
 
                 if exit_point:
                     exit_dt = datetime.fromisoformat(exit_point['timestamp'])
-                    end_ts = int(exit_dt.timestamp() * 1000) + 3600000  # 1 година після виходу
+                    end_ts = int(exit_dt.timestamp() * 1000) + 3600000
                 else:
-                    end_ts = start_ts + (4 * 3600000)  # 4 години всього
+                    end_ts = start_ts + (4 * 3600000)
 
-                logger.info(f"Діапазон свічок: {start_ts} - {end_ts}")
+                klines = await trading_engine.exchange.get_klines(symbol, '1', limit=300)
 
-                # Отримуємо свічки з більшим лімітом
-                klines = await trading_engine.exchange.get_klines(symbol, '1', limit=500)
-
-                if not klines:
-                    logger.warning(f"Немає свічок для {symbol}")
-                    return jsonify({
-                        'order': order_dict,
-                        'pair_order': pair_order,
-                        'entry_point': entry_point,
-                        'exit_point': exit_point,
-                        'klines': [],
-                        'symbol': symbol,
-                        'error': 'No klines data'
-                    })
-
-                logger.info(f"Отримано {len(klines)} свічок для {symbol}")
-
-                # Фільтруємо свічки
                 filtered_klines = []
                 for k in klines:
                     if start_ts <= k['timestamp'] <= end_ts:
                         filtered_klines.append(k)
 
-                logger.info(f"Після фільтрації: {len(filtered_klines)} свічок")
-
-                # Якщо немає свічок, повертаємо всі останні 50
-                if len(filtered_klines) == 0 and len(klines) > 0:
-                    filtered_klines = klines[-50:]
-                    logger.info(f"Використовуємо останні 50 свічок")
+                logger.info(f"Для угоди {order_id}: свічок={len(filtered_klines)}")
 
                 return jsonify({
                     'order': order_dict,
