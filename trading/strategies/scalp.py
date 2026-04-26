@@ -646,48 +646,71 @@ class ScalpStrategy(BaseStrategy):
     async def _close_position(self, symbol: str, reason: str, price: float):
         position = self.open_positions.get(symbol)
         if not position:
+            logger.warning(f"[{symbol}] Позиція не знайдена для закриття")
             return
 
-        revenue = position['quantity'] * price
-        cost = position['quantity'] * position['entry_price']
-        commission = revenue * 0.0018 + cost * 0.0018
-        pnl = revenue - cost - commission
+        try:
+            revenue = position['quantity'] * price
+            cost = position['quantity'] * position['entry_price']
+            commission = revenue * 0.0018 + cost * 0.0018
+            pnl = revenue - cost - commission
 
-        result = await self.exchange.create_order(symbol, 'sell', 'Market', position['quantity'], price)
+            result = await self.exchange.create_order(symbol, 'sell', 'Market', position['quantity'], price)
 
-        if result.get('error'):
-            logger.error(f"Помилка закриття позиції {symbol}: {result}")
-            return
+            if result.get('error'):
+                logger.error(f"Помилка закриття позиції {symbol}: {result}")
+                return
 
-        self.balance += revenue - commission
-        self.locked_balance -= cost
-        self.total_pnl += pnl
-        self.total_trades += 1
+            self.balance += revenue - commission
+            self.locked_balance -= cost
+            self.total_pnl += pnl
+            self.total_trades += 1
 
-        if pnl > 0:
-            self.winning_trades += 1
-        else:
-            self.losing_trades += 1
+            if pnl > 0:
+                self.winning_trades += 1
+            else:
+                self.losing_trades += 1
 
-        # Оновлюємо статус ордера з ціною закриття
-        with get_db() as conn:
-            conn.execute(
-                "UPDATE orders SET status = 'closed', closed_at = ?, closed_price = ?, pnl = ?, commission = ? WHERE order_id = ?",
-                (datetime.now().isoformat(), price, pnl, commission, position['order_id'])
-            )
+            # Оновлюємо статус ордера з ціною закриття
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE orders SET status = 'closed', closed_at = ?, closed_price = ?, pnl = ?, commission = ? WHERE order_id = ?",
+                    (datetime.now().isoformat(), price, pnl, commission, position['order_id'])
+                )
 
-        reason_text = {
-            'take_profit': '🎯 Take Profit',
-            'stop_loss': '🛑 Stop Loss',
-            'trailing_stop': '📉 Trailing Stop',
-            'emergency_stop': '🛑 Екстрена зупинка',
-            'reset': '🔄 Скидання'
-        }.get(reason, reason)
+            reason_text = {
+                'take_profit': '🎯 Take Profit',
+                'stop_loss': '🛑 Stop Loss',
+                'trailing_stop': '📉 Trailing Stop',
+                'emergency_stop': '🛑 Екстрена зупинка',
+                'reset': '🔄 Скидання'
+            }.get(reason, reason)
 
-        del self.open_positions[symbol]
+            del self.open_positions[symbol]
 
-        add_log("INFO", self.name,
-                f"📉 Закрито LONG позицію {symbol} @ ${price:.2f} | PnL: ${pnl:.2f} | {reason_text}")
+            add_log("INFO", self.name,
+                    f"📉 Закрито LONG позицію {symbol} @ ${price:.2f} | PnL: ${pnl:.2f} | {reason_text}")
+
+            # Telegram сповіщення
+            if self.telegram_bot:
+                pnl_icon = "✅" if pnl >= 0 else "❌"
+                await self.telegram_bot.send_notification(
+                    f"📉 *ЗАКРИТО ПОЗИЦІЮ* (Scalp)\n"
+                    f"└ Пара: `{symbol}`\n"
+                    f"└ Ціна входу: `${position['entry_price']:.2f}`\n"
+                    f"└ Ціна виходу: `${price:.2f}`\n"
+                    f"└ PnL: {pnl_icon} `${pnl:.2f}`\n"
+                    f"└ Причина: {reason_text}",
+                    parse_mode='Markdown'
+                )
+
+            self.update_balance_for_drawdown()
+
+        except Exception as e:
+            logger.error(f"Критична помилка при закритті позиції {symbol}: {e}")
+            # Примусово видаляємо позицію, щоб уникнути блокування
+            if symbol in self.open_positions:
+                del self.open_positions[symbol]
 
         # ============= НОВЕ: ТЕЛЕГРАМ СПОВІЩЕННЯ =============
         if self.telegram_bot:
@@ -741,10 +764,14 @@ class ScalpStrategy(BaseStrategy):
 
     async def reset(self):
         logger.warning(f"Скидання Scalp стратегії")
-        for symbol in list(self.open_positions.keys()):
+        symbols_to_close = list(self.open_positions.keys())
+        for symbol in symbols_to_close:
             price = self.current_prices.get(symbol, 0)
             if price > 0:
-                await self._close_position(symbol, 'reset', price)
+                try:
+                    await self._close_position(symbol, 'reset', price)
+                except Exception as e:
+                    logger.error(f"Помилка закриття позиції {symbol} при скиданні: {e}")
         self.balance = 100.0
         self.locked_balance = 0.0
         self.total_pnl = 0.0
@@ -763,8 +790,13 @@ class ScalpStrategy(BaseStrategy):
 
     async def emergency_stop(self):
         logger.warning(f"Екстрена зупинка Scalp стратегії")
-        for symbol in list(self.open_positions.keys()):
+        # Створюємо копію ключів, щоб уникнути помилки "dict changed during iteration"
+        symbols_to_close = list(self.open_positions.keys())
+        for symbol in symbols_to_close:
             price = self.current_prices.get(symbol, 0)
             if price > 0:
-                await self._close_position(symbol, 'emergency_stop', price)
+                try:
+                    await self._close_position(symbol, 'emergency_stop', price)
+                except Exception as e:
+                    logger.error(f"Помилка закриття позиції {symbol} при екстреній зупинці: {e}")
         await self.stop()
