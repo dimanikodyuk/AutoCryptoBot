@@ -15,6 +15,10 @@ def get_local_now():
     """Повертає поточний час у часовій зоні Києва"""
     return datetime.now(KYIV_TZ).replace(tzinfo=None)
 
+def get_local_now_str():
+    """Повертає поточний час у форматі 'YYYY-MM-DD HH:MM:SS'"""
+    return datetime.now(KYIV_TZ).strftime('%Y-%m-%d %H:%M:%S')
+
 @contextmanager
 def get_db():
     """Отримати з'єднання з БД"""
@@ -219,7 +223,7 @@ def add_log(level: str, module: str, message: str):
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO logs (timestamp, level, module, message) VALUES (?, ?, ?, ?)",
-                (get_local_now().isoformat(), level, module, message)
+                (get_local_now_str(), level, module, message)
             )
     except Exception as e:
         print(f"Помилка логування: {e}")
