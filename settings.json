@@ -8,7 +8,7 @@
         "order_size_usdt": 20,
         "lower_percent": 15,
         "upper_percent": 15,
-        "enabled": true
+        "enabled": false
     },
     "news": {
         "symbols": [
