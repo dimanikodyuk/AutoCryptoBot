@@ -22,6 +22,7 @@ class NewsStrategy(BaseStrategy):
         self.interval_minutes = saved.get('interval_minutes', 10)
         self.sensitivity = saved.get('sensitivity', 'medium')
         self.enabled = saved.get('enabled', False)
+        self.trade_size_usdt = saved.get('trade_size_usdt', 20)
 
         self.balance = 100.0
         self.locked_balance = 0.0
@@ -36,6 +37,9 @@ class NewsStrategy(BaseStrategy):
         self._analysis_task = None
         self.news_api_key = None
         self.sentiment_history = []
+
+        # Поточні позиції
+        self.open_positions = {}
 
         self._load_api_key()
         self._load_history()
@@ -107,6 +111,15 @@ class NewsStrategy(BaseStrategy):
             conn.execute("INSERT INTO balances (strategy_id, asset, amount, mode, updated_at) VALUES (?,?,?,?,?)",
                          (self.strategy_id, 'USDT', self.balance, self.mode, datetime.now().isoformat()))
 
+    def _save_order(self, order_id: str, symbol: str, side: str, price: float, quantity: float, status: str):
+        with get_db() as conn:
+            conn.execute("""
+                INSERT INTO orders 
+                (order_id, strategy_id, symbol, side, price, quantity, status, order_type, opened_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (order_id, self.strategy_id, symbol, side, price, quantity, status, 'Market',
+                  datetime.now().isoformat()))
+
     async def fetch_news(self) -> List[dict]:
         if not self.news_api_key:
             return []
@@ -158,7 +171,6 @@ class NewsStrategy(BaseStrategy):
         if not self.enabled:
             return {'action': 'hold'}
 
-        # Перевірка лімітів
         if not self.can_trade():
             logger.warning(f"[News] Торгівля заблокована: {self._block_reason}")
             return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
@@ -183,10 +195,10 @@ class NewsStrategy(BaseStrategy):
         return {'action': 'hold', 'sentiment': self.current_sentiment}
 
     def _generate_signal(self, sent):
-        mult = {'low':2.0, 'medium':1.5, 'high':1.0}[self.sensitivity]
-        thresh = int(4*mult)
+        mult = {'low': 2.0, 'medium': 1.5, 'high': 1.0}[self.sensitivity]
+        thresh = int(4 * mult)
+
         if sent['positive'] > sent['negative'] + thresh and sent['positive'] >= 3:
-            # ============= ТЕЛЕГРАМ СПОВІЩЕННЯ =============
             if self.telegram_bot:
                 asyncio.create_task(
                     self.telegram_bot.send_notification(
@@ -198,9 +210,10 @@ class NewsStrategy(BaseStrategy):
                     )
                 )
             self.increment_daily_trades()
-            return {'action':'buy', 'reason':'positive_news'}
+            asyncio.create_task(self._execute_buy_signal())
+            return {'action': 'buy', 'reason': 'positive_news'}
+
         elif sent['negative'] > sent['positive'] + thresh and sent['negative'] >= 3:
-            # ============= ТЕЛЕГРАМ СПОВІЩЕННЯ =============
             if self.telegram_bot:
                 asyncio.create_task(
                     self.telegram_bot.send_notification(
@@ -212,14 +225,141 @@ class NewsStrategy(BaseStrategy):
                     )
                 )
             self.increment_daily_trades()
-            return {'action':'sell', 'reason':'negative_news'}
-        return {'action':'hold'}
+            asyncio.create_task(self._execute_sell_signal())
+            return {'action': 'sell', 'reason': 'negative_news'}
+
+        return {'action': 'hold'}
+
+    async def _execute_buy_signal(self):
+        """Виконання сигналу на покупку"""
+        if not self.can_trade(self.trade_size_usdt):
+            logger.warning(f"[News] Торгівля заблокована: {self._block_reason}")
+            return
+
+        symbol = self.symbols[0] + 'USDT'
+        price = await self.exchange.get_current_price(symbol)
+
+        if price > 0:
+            await self._open_position(symbol, 'buy', price)
+
+    async def _execute_sell_signal(self):
+        """Виконання сигналу на продаж"""
+        if not self.can_trade(self.trade_size_usdt):
+            logger.warning(f"[News] Торгівля заблокована: {self._block_reason}")
+            return
+
+        for symbol in list(self.open_positions.keys()):
+            price = await self.exchange.get_current_price(symbol)
+            if price > 0:
+                await self._close_position(symbol, price)
+
+    async def _open_position(self, symbol: str, side: str, price: float):
+        quantity = self.trade_size_usdt / price
+        cost = quantity * price
+
+        if self.available_balance < cost:
+            logger.warning(f"[News] Недостатньо балансу: потрібно ${cost:.2f}")
+            return
+
+        order_id = f"news_{symbol}_{int(datetime.now().timestamp())}_{self.strategy_id}"
+        result = await self.exchange.create_order(symbol, side, 'Market', quantity, price)
+
+        if result.get('error'):
+            logger.error(f"Помилка відкриття позиції {symbol}: {result}")
+            return
+
+        self.open_positions[symbol] = {
+            'order_id': order_id,
+            'entry_price': price,
+            'quantity': quantity,
+            'side': side,
+            'opened_at': datetime.now()
+        }
+        self.locked_balance += cost
+        self._save_order(order_id, symbol, side, price, quantity, 'open')
+
+        add_log("INFO", self.name, f"📈 Відкрито позицію {symbol} @ ${price:.2f} (новинний сигнал)")
+
+        if self.telegram_bot:
+            await self.telegram_bot.send_notification(
+                f"📰 *НОВИННИЙ СИГНАЛ - ВІДКРИТО ПОЗИЦІЮ*\n"
+                f"└ Символ: {symbol}\n"
+                f"└ Сторона: {side.upper()}\n"
+                f"└ Ціна: ${price:.2f}",
+                parse_mode='Markdown'
+            )
+
+    async def _close_position(self, symbol: str, price: float):
+        position = self.open_positions.get(symbol)
+        if not position:
+            return
+
+        revenue = position['quantity'] * price
+        cost = position['quantity'] * position['entry_price']
+        commission = revenue * 0.0018 + cost * 0.0018
+        pnl = revenue - cost - commission
+
+        result = await self.exchange.create_order(symbol, 'sell', 'Market', position['quantity'], price)
+
+        if result.get('error'):
+            logger.error(f"Помилка закриття позиції {symbol}: {result}")
+            return
+
+        self.balance += revenue - commission
+        self.locked_balance -= cost
+        self.total_pnl += pnl
+        self.total_trades += 1
+
+        if pnl > 0:
+            self.winning_trades += 1
+        else:
+            self.losing_trades += 1
+
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE orders SET status = 'closed', closed_at = ?, closed_price = ?, pnl = ?, commission = ? WHERE order_id = ?",
+                (datetime.now().isoformat(), price, pnl, commission, position['order_id'])
+            )
+
+        del self.open_positions[symbol]
+
+        add_log("INFO", self.name, f"📉 Закрито позицію {symbol} @ ${price:.2f} | PnL: ${pnl:.2f}")
+
+        if self.telegram_bot:
+            pnl_icon = "✅" if pnl >= 0 else "❌"
+            await self.telegram_bot.send_notification(
+                f"📰 *НОВИННИЙ СИГНАЛ - ЗАКРИТО ПОЗИЦІЮ*\n"
+                f"└ Символ: {symbol}\n"
+                f"└ PnL: {pnl_icon} ${pnl:.2f}",
+                parse_mode='Markdown'
+            )
 
     async def execute(self, signal):
         if signal.get('action') == 'buy':
             add_log("INFO", self.name, "Сигнал КУПІВЛІ (позитивні новини)")
         elif signal.get('action') == 'sell':
             add_log("INFO", self.name, "Сигнал ПРОДАЖУ (негативні новини)")
+
+    async def update_settings(self, symbols=None, interval_minutes=None,
+                              sensitivity=None, trade_size_usdt=None):
+        if symbols is not None:
+            self.symbols = symbols
+        if interval_minutes is not None:
+            self.interval_minutes = interval_minutes
+        if sensitivity is not None:
+            self.sensitivity = sensitivity
+        if trade_size_usdt is not None:
+            self.trade_size_usdt = trade_size_usdt
+
+        save_strategy_settings('news',
+                               symbols=self.symbols,
+                               interval_minutes=self.interval_minutes,
+                               sensitivity=self.sensitivity,
+                               trade_size_usdt=self.trade_size_usdt)
+
+        add_log("INFO", self.name,
+                f"Оновлено налаштування: {self.symbols}, інтервал={self.interval_minutes}, чутливість={self.sensitivity}, розмір=${self.trade_size_usdt}")
+        return True
 
     async def get_status(self):
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades else 0
@@ -231,9 +371,9 @@ class NewsStrategy(BaseStrategy):
             'winning_trades': self.winning_trades, 'win_rate': round(win_rate, 1),
             'current_sentiment': self.current_sentiment, 'symbols': self.symbols,
             'interval_minutes': self.interval_minutes, 'sensitivity': self.sensitivity,
+            'trade_size_usdt': self.trade_size_usdt,
             'last_news_count': self.articles_count, 'api_key_configured': bool(self.news_api_key),
             'sentiment_history': self.sentiment_history,
-            # Ліміти
             'daily_trades_count': self.daily_trades_count,
             'max_daily_trades': self.max_daily_trades,
             'is_blocked': self._is_blocked,
@@ -250,15 +390,17 @@ class NewsStrategy(BaseStrategy):
         self.last_update = None
         self.articles_count = 0
         self.sentiment_history = []
+        self.open_positions = {}
         with get_db() as conn:
             conn.execute("DELETE FROM orders WHERE strategy_id=?", (self.strategy_id,))
             conn.execute("DELETE FROM balances WHERE strategy_id=?", (self.strategy_id,))
         self._save_balance()
-
-        # Скидаємо ліміти
         await self.reset_limits()
-
         add_log("INFO", self.name, "Стратегію скинуто")
 
     async def emergency_stop(self):
+        for symbol in list(self.open_positions.keys()):
+            price = await self.exchange.get_current_price(symbol)
+            if price > 0:
+                await self._close_position(symbol, price)
         await self.stop()
