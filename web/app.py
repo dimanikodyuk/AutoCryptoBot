@@ -651,6 +651,23 @@ def create_flask_app(config, trading_engine):
                 return jsonify({'success': True})
         return jsonify({'error': 'Strategy not found'}), 404
 
+    @app.route('/api/scalp_settings', methods=['POST'])
+    @async_route
+    async def api_scalp_settings():
+        data = request.get_json()
+        for strategy in trading_engine.strategies.values():
+            if strategy.name == 'scalp' and hasattr(strategy, 'update_settings'):
+                await strategy.update_settings(
+                    symbols=data.get('symbols'),
+                    timeframe=data.get('timeframe'),  # ← ДОДАТИ
+                    trade_size_usdt=data.get('trade_size_usdt'),
+                    take_profit_percent=data.get('take_profit_percent'),
+                    stop_loss_percent=data.get('stop_loss_percent'),
+                    trailing_stop_percent=data.get('trailing_stop_percent')
+                )
+                return jsonify({'success': True})
+        return jsonify({'error': 'Strategy not found'}), 404
+
     # ============= База даних API =============
 
     @app.route('/api/db_tables_list')
@@ -887,22 +904,7 @@ def create_flask_app(config, trading_engine):
                 return jsonify(status)
         return jsonify({'error': 'Scalp strategy not found'}), 404
 
-    @app.route('/api/scalp_settings', methods=['POST'])
-    @async_route
-    async def api_scalp_settings():
-        data = request.get_json()
-        for strategy in trading_engine.strategies.values():
-            if strategy.name == 'scalp' and hasattr(strategy, 'update_settings'):
-                await strategy.update_settings(
-                    symbols=data.get('symbols'),
-                    timeframe=data.get('timeframe'),  # ← ДОДАТИ
-                    trade_size_usdt=data.get('trade_size_usdt'),
-                    take_profit_percent=data.get('take_profit_percent'),
-                    stop_loss_percent=data.get('stop_loss_percent'),
-                    trailing_stop_percent=data.get('trailing_stop_percent')
-                )
-                return jsonify({'success': True})
-        return jsonify({'error': 'Strategy not found'}), 404
+
 
     # ============= Система API =============
 
@@ -1139,6 +1141,22 @@ def create_flask_app(config, trading_engine):
             'api_key_configured': False,
             'sentiment_history': []
         })
+
+    @app.route('/api/scalp/force_close/<symbol>', methods=['POST'])
+    @async_route
+    async def api_scalp_force_close(symbol):
+        """Примусове закриття позиції скальпінгу по символу"""
+        logger.info(f"Запит на примусове закриття позиції {symbol}")
+
+        for strategy in trading_engine.strategies.values():
+            if strategy.name == 'scalp':
+                if hasattr(strategy, 'force_close_position'):
+                    result = await strategy.force_close_position(symbol)
+                    return jsonify(result)
+                else:
+                    return jsonify({'success': False, 'error': 'Method force_close_position not found'}), 500
+
+        return jsonify({'success': False, 'error': 'Scalp strategy not found'}), 404
 
     @app.route('/api/news_settings', methods=['POST'])
     @async_route

@@ -936,7 +936,16 @@
                     for (const [symbol, pos] of Object.entries(data.open_positions)) {
                         const currentPrice = data.current_price?.[symbol] || pos.entry_price;
                         const pnlPercent = (currentPrice - pos.entry_price) / pos.entry_price * 100;
-                        positionsHtml += `<div class="scalp-position-card"><div><strong>${symbol}</strong></div><div>Вхід: $${pos.entry_price.toFixed(2)}</div><div>Кількість: ${pos.quantity.toFixed(6)}</div><div>Поточна: $${currentPrice.toFixed(2)}</div><div class="${pnlPercent >= 0 ? 'scalp-positive' : 'scalp-negative'}">PnL: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%</div></div>`;
+                        positionsHtml += `
+                            <div class="scalp-position-card" id="pos_${symbol}">
+                                <div><strong>${symbol}</strong></div>
+                                <div>Вхід: $${pos.entry_price.toFixed(2)}</div>
+                                <div>Кількість: ${pos.quantity.toFixed(6)}</div>
+                                <div>Поточна: $${currentPrice.toFixed(2)}</div>
+                                <div class="${pnlPercent >= 0 ? 'scalp-positive' : 'scalp-negative'}">PnL: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%</div>
+                                <button class="btn-small" onclick="forceCloseScalpPosition('${symbol}')" style="background: #dc3545; margin-top: 10px; width: 100%;">❌ Примусово закрити</button>
+                            </div>
+                        `;
                     }
                 } else {
                     positionsHtml = '<div class="loading">Немає активних позицій</div>';
@@ -1815,6 +1824,48 @@
                 .then(r=>r.json()).then(data=>{ if(data.success) { alert('Збережено!'); loadNewsStrategy(); } else alert('Помилка'); }).catch(e=>alert(e));
         }
 
+        // ============= СКАСУВАННЯ скальпын угоди =======
+        async function forceCloseScalpPosition(symbol) {
+            if (!confirm(`⚠️ Примусово закрити позицію ${symbol}?\n\nУвага! Угода закриється за поточною ринковою ціною.`)) {
+                return;
+            }
+
+            const card = document.getElementById(`pos_${symbol}`);
+            if (card) {
+                card.style.opacity = '0.5';
+                card.style.pointerEvents = 'none';
+            }
+
+            try {
+                const response = await fetch(`/api/scalp/force_close/${symbol}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    const pnlIcon = result.pnl >= 0 ? '✅' : '❌';
+                    alert(`📉 Позицію ${symbol} закрито!\n\nВхід: $${result.entry_price.toFixed(2)}\nВихід: $${result.close_price.toFixed(2)}\nPnL: ${pnlIcon} $${result.pnl.toFixed(2)} (${result.pnl_percent >= 0 ? '+' : ''}${result.pnl_percent}%)`);
+
+                    // Оновлюємо сторінку
+                    loadScalpStrategy();
+                    loadAllData();
+                } else {
+                    alert(`❌ Помилка: ${result.error}`);
+                    if (card) {
+                        card.style.opacity = '1';
+                        card.style.pointerEvents = 'auto';
+                    }
+                }
+            } catch(e) {
+                console.error(e);
+                alert(`❌ Помилка: ${e.message}`);
+                if (card) {
+                    card.style.opacity = '1';
+                    card.style.pointerEvents = 'auto';
+                }
+            }
+        }
         // ============= БЕКТЕСТИНГ =============
         function setDefaultBacktestDates() {
             const endDate = new Date();

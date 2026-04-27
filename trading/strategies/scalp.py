@@ -88,6 +88,7 @@ class ScalpStrategy(BaseStrategy):
         await super().start()
         save_strategy_settings('scalp', enabled=True)
         self._analysis_task = asyncio.create_task(self._analysis_loop())
+        self.exchange.add_price_callback(self.on_price_update)
         logger.info("ScalpStrategy: цикл аналізу запущено")
 
     async def stop(self):
@@ -160,6 +161,40 @@ class ScalpStrategy(BaseStrategy):
                 "INSERT INTO balances (strategy_id, asset, amount, mode, updated_at) VALUES (?, ?, ?, ?, ?)",
                 (self.strategy_id, 'USDT', self.balance, self.mode, datetime.now().isoformat())
             )
+
+    async def force_close_position(self, symbol: str) -> dict:
+        """Примусове закриття позиції по символу за поточною ціною"""
+        if symbol not in self.open_positions:
+            return {'success': False, 'error': f'No open position for {symbol}'}
+
+        position = self.open_positions[symbol]
+        current_price = self.current_prices.get(symbol, 0)
+
+        if current_price <= 0:
+            current_price = await self.exchange.get_current_price(symbol)
+
+        if current_price <= 0:
+            return {'success': False, 'error': f'Cannot get current price for {symbol}'}
+
+        # Розраховуємо PnL
+        revenue = position['quantity'] * current_price
+        cost = position['quantity'] * position['entry_price']
+        commission = revenue * 0.0018 + cost * 0.0018
+        pnl = revenue - cost - commission
+        pnl_percent = (current_price - position['entry_price']) / position['entry_price'] * 100
+
+        # Закриваємо позицію
+        await self._close_position(symbol, 'force_close', current_price)
+
+        return {
+            'success': True,
+            'symbol': symbol,
+            'entry_price': position['entry_price'],
+            'close_price': current_price,
+            'pnl': round(pnl, 2),
+            'pnl_percent': round(pnl_percent, 2),
+            'quantity': position['quantity']
+        }
 
     def _save_order(self, order_id: str, symbol: str, side: str, price: float, quantity: float, status: str):
         with get_db() as conn:
@@ -477,6 +512,16 @@ class ScalpStrategy(BaseStrategy):
             logger.error(f"Помилка отримання індикаторів {symbol}: {e}")
             return None
 
+    async def on_price_update(self, symbol: str, price: float):
+        """Оновлення ціни через WebSocket"""
+        self.current_prices[symbol] = price
+
+        # Оновлюємо PnL для відкритих позицій
+        if symbol in self.open_positions:
+            position = self.open_positions[symbol]
+            pnl_percent = (price - position['entry_price']) / position['entry_price'] * 100
+            logger.debug(f"[{symbol}] Оновлення ціни: ${price:.2f}, PnL: {pnl_percent:.2f}%")
+
     async def _calculate_atr(self, highs: List[float], lows: List[float], closes: List[float],
                              period: int = 14) -> float:
         """Розрахунок ATR (Average True Range) для фільтра волатильності"""
@@ -623,7 +668,8 @@ class ScalpStrategy(BaseStrategy):
             'quantity': quantity,
             'highest_price': price,
             'lowest_price': price,
-            'strong_signal': strong
+            'strong_signal': strong,
+            'opened_at': datetime.now().isoformat()  # ДОДАЙ ЦЕЙ РЯДОК
         }
         self.locked_balance += cost
         self._save_order(order_id, symbol, 'buy', price, quantity, 'open')
@@ -650,9 +696,19 @@ class ScalpStrategy(BaseStrategy):
     async def _close_position(self, symbol: str, reason: str, price: float):
         position = self.open_positions.get(symbol)
         # Після закриття позиції, оновлюємо свічки до моменту закриття
-        await self._save_trade_chart_data(position['order_id'], symbol,
-                                          datetime.fromisoformat(position['entry_time']),
-                                          datetime.now())
+        opened_at_str = position.get('opened_at')
+        if opened_at_str:
+            opened_at = datetime.fromisoformat(opened_at_str)
+        else:
+            # Якщо немає opened_at, використовуємо поточний час
+            opened_at = datetime.now()
+
+        await self._save_trade_chart_data(
+            position['order_id'],
+            symbol,
+            opened_at,
+            datetime.now()
+        )
         if not position:
             logger.warning(f"[{symbol}] Позиція не знайдена для закриття")
             return
