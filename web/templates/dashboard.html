@@ -282,6 +282,45 @@
             <div id="newsContent"><div class="loading">Завантаження новин...</div></div>
         </div>
 
+               <!-- Керування -->
+        <div id="tab-controls" class="tab-content">
+            <div class="stats-grid" id="systemStats">
+                <div class="stat-card"><div class="stat-value" id="cpuUsage">-</div><div class="stat-label">CPU</div></div>
+                <div class="stat-card"><div class="stat-value" id="ramUsage">-</div><div class="stat-label">RAM</div></div>
+                <div class="stat-card"><div class="stat-value" id="diskUsage">-</div><div class="stat-label">Диск</div></div>
+                <div class="stat-card"><div class="stat-value" id="botUptime">-</div><div class="stat-label">Uptime</div></div>
+            </div>
+
+            <div class="stats-grid" id="electricityStats">
+                <div class="stat-card"><div class="stat-value" id="powerCost">-</div><div class="stat-label">Витрачено (грн)</div></div>
+                <div class="stat-card"><div class="stat-value" id="powerEnergy">-</div><div class="stat-label">Спожито (кВт⋅год)</div></div>
+                <div class="stat-card"><div class="stat-value" id="powerMonthly">-</div><div class="stat-label">За місяць (грн)</div></div>
+                <div class="stat-card"><div class="stat-value" id="powerYearly">-</div><div class="stat-label">За рік (грн)</div></div>
+                <div class="stat-card"><div class="stat-value" id="currentPower">-</div><div class="stat-label">Поточна потужність (W)</div></div>
+                <div class="stat-card"><div class="stat-value" id="cpuLoad">-</div><div class="stat-label">CPU</div></div>
+            </div>
+
+            <div class="settings-panel">
+                <h3>🎮 Режим роботи</h3>
+                <div class="settings-row">
+                    <label>Поточний режим:</label>
+                    <strong id="currentMode" style="padding: 4px 12px; border-radius: 20px;">-</strong>
+                    <button id="modeSimulation" class="btn-mode" onclick="changeMode('simulation')" style="background:#28a745;">🟢 Симуляція</button>
+                    <button id="modeMonitor" class="btn-mode" onclick="changeMode('monitor')" style="background:#ff8800;">🟡 Моніторинг</button>
+                    <button id="modeReal" class="btn-mode" onclick="changeMode('real')" style="background:#dc3545;">🔴 РЕАЛЬНА</button>
+                </div>
+                <div id="balanceInfo" style="margin-top: 10px; font-size: 12px; color: #888;"></div>
+            </div>
+
+            <div class="settings-panel">
+                <h3>🔧 Дії</h3>
+                <div class="settings-row">
+                    <button class="btn-danger" onclick="emergencyStop()">🛑 ЕКСТРЕНА ЗУПИНКА</button>
+                    <button onclick="restartBot()" style="background: #ff8800;">🔄 Перезапустити бота</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Бектестинг -->
         <div id="tab-backtest" class="tab-content">
             <div class="settings-panel">
@@ -1381,26 +1420,45 @@
         // ============= SYSTEM =============
         async function loadSystemStatus() {
             try {
-                const resp=await fetch('/api/system_status');
-                const data=await resp.json();
-                document.getElementById('cpuUsage').innerHTML=`${data.cpu_percent||0}%`;
-                document.getElementById('ramUsage').innerHTML=`${data.ram_percent||0}% (${data.ram_used_gb||0}/${data.ram_total_gb||0} GB)`;
-                document.getElementById('diskUsage').innerHTML=`${data.disk_percent||0}% (${data.disk_used_gb||0}/${data.disk_total_gb||0} GB)`;
-                document.getElementById('botUptime').innerHTML=data.uptime||'-';
-            } catch(e) { console.error(e); }
+                const resp = await fetch('/api/system_status');
+                const data = await resp.json();
+
+                // Перевіряємо чи існують елементи перед оновленням
+                const cpuElem = document.getElementById('cpuUsage');
+                const ramElem = document.getElementById('ramUsage');
+                const diskElem = document.getElementById('diskUsage');
+                const uptimeElem = document.getElementById('botUptime');
+
+                if (cpuElem) cpuElem.innerHTML = `${data.cpu_percent || 0}%`;
+                if (ramElem) ramElem.innerHTML = `${data.ram_percent || 0}% (${data.ram_used_gb || 0}/${data.ram_total_gb || 0} GB)`;
+                if (diskElem) diskElem.innerHTML = `${data.disk_percent || 0}% (${data.disk_used_gb || 0}/${data.disk_total_gb || 0} GB)`;
+                if (uptimeElem) uptimeElem.innerHTML = data.uptime || '-';
+            } catch(e) {
+                console.error('Помилка loadSystemStatus:', e);
+            }
         }
 
         async function loadElectricity() {
             try {
                 const response = await fetch('/api/electricity');
                 const data = await response.json();
-                document.getElementById('powerCost').innerHTML = `${data.cost_uah} ₴`;
-                document.getElementById('powerEnergy').innerHTML = `${data.energy_used_kwh} кВт⋅год`;
-                document.getElementById('powerMonthly').innerHTML = `${data.monthly_cost_uah} ₴`;
-                document.getElementById('powerYearly').innerHTML = `${data.yearly_cost_uah} ₴`;
-                document.getElementById('currentPower').innerHTML = `${data.current_power} W`;
-                document.getElementById('cpuLoad').innerHTML = `${data.cpu_load}%`;
-            } catch(e) { console.error(e); }
+
+                const powerCostElem = document.getElementById('powerCost');
+                const powerEnergyElem = document.getElementById('powerEnergy');
+                const powerMonthlyElem = document.getElementById('powerMonthly');
+                const powerYearlyElem = document.getElementById('powerYearly');
+                const currentPowerElem = document.getElementById('currentPower');
+                const cpuLoadElem = document.getElementById('cpuLoad');
+
+                if (powerCostElem) powerCostElem.innerHTML = `${data.cost_uah} ₴`;
+                if (powerEnergyElem) powerEnergyElem.innerHTML = `${data.energy_used_kwh} кВт⋅год`;
+                if (powerMonthlyElem) powerMonthlyElem.innerHTML = `${data.monthly_cost_uah} ₴`;
+                if (powerYearlyElem) powerYearlyElem.innerHTML = `${data.yearly_cost_uah} ₴`;
+                if (currentPowerElem) currentPowerElem.innerHTML = `${data.current_power} W`;
+                if (cpuLoadElem) cpuLoadElem.innerHTML = `${data.cpu_load}%`;
+            } catch(e) {
+                console.error('Помилка loadElectricity:', e);
+            }
         }
 
         // ============= ГРАФІК УГОДИ =============

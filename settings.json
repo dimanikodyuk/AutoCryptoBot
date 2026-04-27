@@ -17,7 +17,7 @@
         ],
         "interval_minutes": 10,
         "sensitivity": "medium",
-        "enabled": false
+        "enabled": true
     },
     "scalp": {
         "symbols": [
@@ -29,7 +29,7 @@
         "take_profit_percent": 0.5,
         "stop_loss_percent": 0.25,
         "trailing_stop_percent": 0.3,
-        "enabled": false,
+        "enabled": true,
         "timeframe": "1"
     }
 }
