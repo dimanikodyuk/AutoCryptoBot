@@ -75,24 +75,29 @@ class GridInstance:
             from database.db import save_price_history
             from datetime import datetime, timezone
 
-            # Визначаємо діапазон свічок: 30 хв до і 30 хв після
             ts = int(timestamp.timestamp() * 1000)
             start_ts = ts - 30 * 60 * 1000
             end_ts = ts + 30 * 60 * 1000
 
-            # Отримуємо свічки
+            logger.info(f"[{self.symbol}] Зберігаємо свічки для {order_id}: діапазон {start_ts} - {end_ts}")
+
             klines = await self.exchange.get_klines(self.symbol, '1', limit=200)
             klines.sort(key=lambda k: k['timestamp'])
 
+            # Логуємо діапазон отриманих свічок
+            if klines:
+                logger.info(
+                    f"[{self.symbol}] Отримано свічки: від {klines[0]['timestamp']} до {klines[-1]['timestamp']}")
+
             filtered_klines = [k for k in klines if start_ts <= k['timestamp'] <= end_ts]
 
-            # Додаємо time_iso
+            logger.info(f"[{self.symbol}] Відфільтровано {len(filtered_klines)} свічок")
+
             for k in filtered_klines:
                 k['time_iso'] = datetime.utcfromtimestamp(k['timestamp'] / 1000).strftime('%Y-%m-%dT%H:%M:%S')
 
             if filtered_klines:
                 save_price_history(order_id, self.symbol, filtered_klines)
-                logger.info(f"[{self.symbol}] Збережено {len(filtered_klines)} свічок для ордера {order_id}")
 
         except Exception as e:
             logger.error(f"Помилка збереження свічок: {e}")
