@@ -936,13 +936,49 @@
                     for (const [symbol, pos] of Object.entries(data.open_positions)) {
                         const currentPrice = data.current_price?.[symbol] || pos.entry_price;
                         const pnlPercent = (currentPrice - pos.entry_price) / pos.entry_price * 100;
+
+                        // Розрахунок реального PnL з комісією
+                        const quantity = pos.quantity;
+                        const entryPrice = pos.entry_price;
+                        const currentPriceVal = currentPrice;
+
+                        // Комісія 0.18% на вхід і 0.18% на вихід = 0.36%
+                        const commissionRate = 0.0018;
+                        const buyCommission = quantity * entryPrice * commissionRate;
+                        const sellCommission = quantity * currentPriceVal * commissionRate;
+                        const totalCommission = buyCommission + sellCommission;
+
+                        // Реальний PnL
+                        const revenue = quantity * currentPriceVal;
+                        const cost = quantity * entryPrice;
+                        const realPnl = revenue - cost - totalCommission;
+                        const realPnlPercent = (realPnl / cost) * 100;
+
+                        // Необхідний рух для беззбитковості
+                        const breakEvenMove = (totalCommission / cost) * 100;
+
+                        // Прогнозований PnL при різних цілях
+                        const tp08 = (quantity * entryPrice * 1.008) - cost - totalCommission;
+                        const tp10 = (quantity * entryPrice * 1.01) - cost - totalCommission;
+
                         positionsHtml += `
-                            <div class="scalp-position-card" id="pos_${symbol}">
+                            <div class="scalp-position-card" id="pos_${symbol}" style="margin-bottom: 15px;">
                                 <div><strong>${symbol}</strong></div>
-                                <div>Вхід: $${pos.entry_price.toFixed(2)}</div>
-                                <div>Кількість: ${pos.quantity.toFixed(6)}</div>
-                                <div>Поточна: $${currentPrice.toFixed(2)}</div>
-                                <div class="${pnlPercent >= 0 ? 'scalp-positive' : 'scalp-negative'}">PnL: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%</div>
+                                <div>💰 Вхід: $${entryPrice.toFixed(2)}</div>
+                                <div>📊 Кількість: ${quantity.toFixed(6)}</div>
+                                <div>🔄 Поточна: $${currentPriceVal.toFixed(2)}</div>
+                                <div class="${pnlPercent >= 0 ? 'scalp-positive' : 'scalp-negative'}">
+                                    📈 PnL (без комісії): ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}% ($${(revenue - cost).toFixed(2)})
+                                </div>
+                                <div class="${realPnl >= 0 ? 'scalp-positive' : 'scalp-negative'}" style="border-top: 1px solid #2a2a4a; margin-top: 8px; padding-top: 8px;">
+                                    💰 РЕАЛЬНИЙ PnL (з комісією): ${realPnl >= 0 ? '✅' : '❌'} ${realPnl >= 0 ? '+' : ''}$${realPnl.toFixed(4)} (${realPnlPercent >= 0 ? '+' : ''}${realPnlPercent.toFixed(2)}%)
+                                </div>
+                                <div style="font-size: 11px; color: #888; margin-top: 5px;">
+                                    ⚠️ Для беззбитковості потрібен рух: ${breakEvenMove.toFixed(2)}%
+                                </div>
+                                <div style="font-size: 11px; color: #888; margin-top: 5px;">
+                                    🎯 При TP 0.8%: $${tp08.toFixed(4)} | При TP 1.0%: $${tp10.toFixed(4)}
+                                </div>
                                 <button class="btn-small" onclick="forceCloseScalpPosition('${symbol}')" style="background: #dc3545; margin-top: 10px; width: 100%;">❌ Примусово закрити</button>
                             </div>
                         `;
