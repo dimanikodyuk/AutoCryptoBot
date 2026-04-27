@@ -231,7 +231,12 @@ class NewsStrategy(BaseStrategy):
         mult = {'low': 2.0, 'medium': 1.5, 'high': 1.0}[self.sensitivity]
         thresh = int(4 * mult)
 
+        # СИГНАЛ НА ПОКУПКУ - завжди можна (якщо немає відкритої позиції)
         if sent['positive'] > sent['negative'] + thresh and sent['positive'] >= 3:
+            if self.open_positions:
+                logger.info("[News] Вже є відкрита позиція, новий BUY сигнал ігнорується")
+                return {'action': 'hold', 'reason': 'already_in_position'}
+
             if self.telegram_bot:
                 asyncio.create_task(
                     self.telegram_bot.send_notification(
@@ -246,7 +251,12 @@ class NewsStrategy(BaseStrategy):
             asyncio.create_task(self._execute_buy_signal())
             return {'action': 'buy', 'reason': 'positive_news'}
 
+        # СИГНАЛ НА ПРОДАЖ - ТІЛЬКИ ЯКЩО Є ВІДКРИТА ПОЗИЦІЯ
         elif sent['negative'] > sent['positive'] + thresh and sent['negative'] >= 3:
+            if not self.open_positions:
+                logger.info("[News] Немає відкритих позицій, SELL сигнал ігнорується")
+                return {'action': 'hold', 'reason': 'no_position_to_sell'}
+
             if self.telegram_bot:
                 asyncio.create_task(
                     self.telegram_bot.send_notification(
@@ -277,10 +287,17 @@ class NewsStrategy(BaseStrategy):
 
     async def _execute_sell_signal(self):
         """Виконання сигналу на продаж"""
+        # ПЕРЕВІРКА: чи є відкриті позиції?
+        if not self.open_positions:
+            logger.info("[News] Немає відкритих позицій для продажу")
+            return
+
+        # ПЕРЕВІРКА: чи можна торгувати
         if not self.can_trade(self.trade_size_usdt):
             logger.warning(f"[News] Торгівля заблокована: {self._block_reason}")
             return
 
+        # Закриваємо ВСІ відкриті позиції
         for symbol in list(self.open_positions.keys()):
             price = await self.exchange.get_current_price(symbol)
             if price > 0:
