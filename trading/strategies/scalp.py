@@ -688,6 +688,8 @@ class ScalpStrategy(BaseStrategy):
                 'reset': '🔄 Скидання'
             }.get(reason, reason)
 
+            order_id_saved = position['order_id']
+            entry_price_saved = position['entry_price']
             del self.open_positions[symbol]
 
             add_log("INFO", self.name,
@@ -699,7 +701,7 @@ class ScalpStrategy(BaseStrategy):
                 await self.telegram_bot.send_notification(
                     f"📉 *ЗАКРИТО ПОЗИЦІЮ* (Scalp)\n"
                     f"└ Пара: `{symbol}`\n"
-                    f"└ Ціна входу: `${position['entry_price']:.2f}`\n"
+                    f"└ Ціна входу: `${entry_price_saved:.2f}`\n"
                     f"└ Ціна виходу: `${price:.2f}`\n"
                     f"└ PnL: {pnl_icon} `${pnl:.2f}`\n"
                     f"└ Причина: {reason_text}",
@@ -713,21 +715,6 @@ class ScalpStrategy(BaseStrategy):
             # Примусово видаляємо позицію, щоб уникнути блокування
             if symbol in self.open_positions:
                 del self.open_positions[symbol]
-
-        # ============= НОВЕ: ТЕЛЕГРАМ СПОВІЩЕННЯ =============
-        if self.telegram_bot:
-            pnl_icon = "✅" if pnl >= 0 else "❌"
-            await self.telegram_bot.send_notification(
-                f"📉 *ЗАКРИТО ПОЗИЦІЮ* (Scalp)\n"
-                f"└ Пара: `{symbol}`\n"
-                f"└ Ціна входу: `${position['entry_price']:.2f}`\n"
-                f"└ Ціна виходу: `${price:.2f}`\n"
-                f"└ PnL: {pnl_icon} `${pnl:.2f}`\n"
-                f"└ Причина: {reason_text}",
-                parse_mode='Markdown'
-            )
-
-        self.update_balance_for_drawdown()
 
     async def get_status(self) -> dict:
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades else 0

@@ -13,6 +13,7 @@ import logging
 from utils.logger_utils import setup_logger
 from database.db import get_db
 from datetime import datetime
+
 logger = setup_logger('web')
 
 notification_queue = []
@@ -165,8 +166,15 @@ def create_flask_app(config, trading_engine):
                 order_dict = dict(order)
                 strategy_name = order_dict.get('strategy_name', 'unknown')
 
+                # Перевіряємо чи є колонка closed_price (міграція)
+                col_info = conn.execute("PRAGMA table_info(orders)").fetchall()
+                has_closed_price = any(c[1] == 'closed_price' for c in col_info)
+
                 logger.info(
-                    f"Знайдено ордер: strategy={strategy_name}, side={order_dict['side']}, status={order_dict['status']}, closed_price={order_dict.get('closed_price')}")
+                    f"Знайдено ордер: strategy={strategy_name}, side={order_dict['side']}, "
+                    f"status={order_dict['status']}, has_closed_price={has_closed_price}, "
+                    f"closed_price={order_dict.get('closed_price') if has_closed_price else 'N/A'}"
+                )
 
                 entry_point = None
                 exit_point = None
@@ -174,21 +182,38 @@ def create_flask_app(config, trading_engine):
                 if strategy_name == 'scalp':
                     # Точка входу - завжди ціна відкриття
                     entry_point = {
-                        'price': order_dict['price'],
+                        'price': float(order_dict['price']),
                         'timestamp': order_dict['opened_at'],
-                        'quantity': order_dict['quantity']
+                        'quantity': float(order_dict['quantity'])
                     }
 
-                    # Точка виходу - ціна закриття, якщо ордер закритий
-                    if order_dict['status'] == 'closed' and order_dict.get('closed_price'):
-                        exit_point = {
-                            'price': order_dict['closed_price'],
-                            'timestamp': order_dict['closed_at'],
-                            'quantity': order_dict['quantity']
-                        }
-                        logger.info(f"Скальпінг: знайдено вихід price={exit_point['price']}")
-                    else:
-                        logger.info(f"Скальпінг: угода ще відкрита, виходу немає")
+                    # Точка виходу — спочатку беремо closed_price якщо є
+                    if order_dict['status'] == 'closed':
+                        closed_price = None
+                        if has_closed_price and order_dict.get('closed_price'):
+                            closed_price = float(order_dict['closed_price'])
+
+                        # Якщо closed_price відсутній — розраховуємо з PnL
+                        if not closed_price and order_dict.get('pnl') is not None and order_dict.get('quantity'):
+                            qty = float(order_dict['quantity'])
+                            entry_p = float(order_dict['price'])
+                            pnl = float(order_dict.get('pnl', 0))
+                            commission = float(order_dict.get('commission', 0))
+                            if qty > 0:
+                                # revenue = cost + pnl + commission → exit_price = revenue / qty
+                                cost = qty * entry_p
+                                revenue = cost + pnl + commission
+                                closed_price = revenue / qty
+
+                        if closed_price:
+                            exit_point = {
+                                'price': closed_price,
+                                'timestamp': order_dict.get('closed_at') or order_dict['opened_at'],
+                                'quantity': float(order_dict['quantity'])
+                            }
+                            logger.info(f"Скальпінг: вихід price={closed_price:.4f}")
+                        else:
+                            logger.info(f"Скальпінг: угода ще відкрита або немає ціни виходу")
 
                 else:
                     # Для Grid - шукаємо парний ордер
@@ -202,63 +227,115 @@ def create_flask_app(config, trading_engine):
                         if pair_order:
                             pair_order = dict(pair_order)
 
+                    entry_point = {
+                        'price': float(order_dict['price']),
+                        'timestamp': order_dict['opened_at'],
+                        'quantity': float(order_dict['quantity'])
+                    }
                     if order_dict['side'] == 'buy':
-                        entry_point = {
-                            'price': order_dict['price'],
-                            'timestamp': order_dict['opened_at'],
-                            'quantity': order_dict['quantity']
-                        }
                         if pair_order and pair_order['side'] == 'sell':
                             exit_point = {
-                                'price': pair_order['price'],
+                                'price': float(pair_order['price']),
                                 'timestamp': pair_order['opened_at'],
-                                'quantity': pair_order['quantity']
+                                'quantity': float(pair_order['quantity'])
                             }
                     else:
-                        entry_point = {
-                            'price': order_dict['price'],
-                            'timestamp': order_dict['opened_at'],
-                            'quantity': order_dict['quantity']
-                        }
                         if pair_order and pair_order['side'] == 'buy':
                             exit_point = {
-                                'price': pair_order['price'],
+                                'price': float(pair_order['price']),
                                 'timestamp': pair_order['opened_at'],
-                                'quantity': pair_order['quantity']
+                                'quantity': float(pair_order['quantity'])
                             }
 
                 symbol = order_dict['symbol']
 
-                # Отримуємо свічки
-                from datetime import datetime
-                entry_dt = datetime.fromisoformat(entry_point['timestamp'])
-                start_ts = int(entry_dt.timestamp() * 1000) - 3600000  # 1 година до входу
+                # -------------------------------------------------------
+                # Отримуємо свічки, ПРИВ'ЯЗАНІ до часу угоди
+                # -------------------------------------------------------
+                from datetime import datetime, timezone
 
-                if exit_point:
-                    exit_dt = datetime.fromisoformat(exit_point['timestamp'])
-                    end_ts = int(exit_dt.timestamp() * 1000) + 3600000  # 1 година після виходу
+                def parse_dt(ts_str):
+                    """Парсить ISO рядок, повертає datetime з UTC tzinfo"""
+                    if not ts_str:
+                        return None
+                    try:
+                        dt = datetime.fromisoformat(str(ts_str).replace('Z', '+00:00'))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        return dt
+                    except Exception:
+                        return None
+
+                entry_dt = parse_dt(entry_point['timestamp'])
+                if entry_dt is None:
+                    return jsonify({'error': 'Не вдалося розпарсити час відкриття угоди'}), 400
+
+                exit_dt = parse_dt(exit_point['timestamp']) if exit_point else None
+
+                # Визначаємо вікно: 30 хв до входу і 30 хв після виходу (або +2 год від входу)
+                BEFORE_SECS = 30 * 60  # 30 хвилин
+                AFTER_SECS = 30 * 60  # 30 хвилин
+
+                start_ts_ms = int((entry_dt.timestamp() - BEFORE_SECS) * 1000)
+                if exit_dt:
+                    end_ts_ms = int((exit_dt.timestamp() + AFTER_SECS) * 1000)
                 else:
-                    end_ts = start_ts + (4 * 3600000)
+                    end_ts_ms = int((entry_dt.timestamp() + 2 * 3600) * 1000)
 
-                klines = await trading_engine.exchange.get_klines(symbol, '1', limit=500)
+                # Скільки хвилинних свічок потрібно
+                duration_min = (end_ts_ms - start_ts_ms) // 60000
+                needed = max(duration_min + 20, 100)
+                needed = min(needed, 1000)
 
-                filtered_klines = []
-                for k in klines:
-                    if start_ts <= k['timestamp'] <= end_ts:
-                        filtered_klines.append(k)
+                # Завантажуємо свічки з Bybit — передаємо end_ts щоб отримати потрібний діапазон
+                # Bybit повертає свічки від найновіших до найстаріших, тому беремо з запасом
+                klines_raw = await trading_engine.exchange.get_klines(symbol, '1', limit=needed)
 
-                logger.info(f"Для угоди {order_id}: свічок={len(filtered_klines)}, exit={exit_point is not None}")
+                # Сортуємо за зростанням timestamp (Bybit може повертати у зворотньому порядку)
+                klines_raw.sort(key=lambda k: k['timestamp'])
+
+                # Фільтруємо за вікном
+                filtered_klines = [
+                    k for k in klines_raw
+                    if start_ts_ms <= k['timestamp'] <= end_ts_ms
+                ]
+
+                # Якщо після фільтрації мало свічок — повертаємо всі завантажені
+                # (угода стара і поза поточним вікном — не можемо отримати ті свічки без платного API)
+                if len(filtered_klines) < 5:
+                    logger.warning(
+                        f"Після фільтрації лише {len(filtered_klines)} свічок. "
+                        f"Угода від {entry_point['timestamp']} може бути поза поточним вікном даних."
+                    )
+                    # Повертаємо все що є і позначаємо попередження
+                    filtered_klines = klines_raw
+                    out_of_range = True
+                else:
+                    out_of_range = False
+
+                logger.info(
+                    f"Для угоди {order_id}: свічок={len(filtered_klines)}, "
+                    f"exit={exit_point is not None}, out_of_range={out_of_range if 'out_of_range' in dir() else False}"
+                )
+
+                # Конвертуємо timestamp свічок в ISO рядки (щоб фронтенд однаково парсив і свічки і точки)
+                klines_out = []
+                for k in filtered_klines:
+                    k_copy = dict(k)
+                    k_copy['time_iso'] = datetime.utcfromtimestamp(k['timestamp'] / 1000).strftime('%Y-%m-%dT%H:%M:%S')
+                    klines_out.append(k_copy)
 
                 return jsonify({
                     'order': order_dict,
                     'entry_point': entry_point,
                     'exit_point': exit_point,
-                    'klines': filtered_klines,
-                    'symbol': symbol
+                    'klines': klines_out,
+                    'symbol': symbol,
+                    'out_of_range': out_of_range if 'out_of_range' in dir() else False
                 })
 
         except Exception as e:
-            logger.error(f"Помилка отримання даних: {e}")
+            logger.error(f"Помилка отримання даних графіка: {e}")
             import traceback
             traceback.print_exc()
             return jsonify({'error': str(e)}), 500

@@ -54,9 +54,17 @@ def init_db():
                 commission REAL DEFAULT 0,
                 opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 closed_at TIMESTAMP,
+                closed_price REAL,
                 FOREIGN KEY (strategy_id) REFERENCES strategies(id)
             )
         ''')
+
+        # Міграція: додаємо closed_price якщо колонки немає
+        cursor.execute("PRAGMA table_info(orders)")
+        order_columns = [col[1] for col in cursor.fetchall()]
+        if 'closed_price' not in order_columns:
+            print("Додаємо колонку closed_price до таблиці orders...")
+            cursor.execute("ALTER TABLE orders ADD COLUMN closed_price REAL")
 
         # Таблиця балансів - ДОДАЄМО КОЛОНКУ symbol
         cursor.execute('''

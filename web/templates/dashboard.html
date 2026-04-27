@@ -4,12 +4,8 @@
     <title>Crypto Trading Bot</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Plotly для інших графіків -->
+    <!-- Plotly для графіків -->
     <script src="https://cdn.plot.ly/plotly-3.0.1.min.js" charset="utf-8"></script>
-    <!-- Lightweight Charts - новий CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.js"></script>
-    <script src="https://cdn.plot.ly/plotly-3.0.1.min.js" charset="utf-8"></script>
-    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; }
@@ -1229,7 +1225,7 @@
             } catch(e) { console.error(e); }
         }
 
-        // ============= ГРАФІК УГОДИ (LIGHTWEIGHT CHARTS) =============
+        // ============= ГРАФІК УГОДИ (PLOTLY) =============
         let tradeChartInstance = null;
         async function showTradeChart(orderId, symbol, side, price, quantity, pnl, timestamp) {
             const modal = document.getElementById('tradeModal');
@@ -1238,17 +1234,18 @@
 
             modal.style.display = 'block';
 
+            const pnlVal = parseFloat(pnl || 0);
             tradeInfoDiv.innerHTML = `
-                <div class="trade-info-item"><div class="trade-info-label">Ордер ID</div><div class="trade-info-value" style="font-size:12px;">${orderId.substring(0, 20)}...</div></div>
+                <div class="trade-info-item"><div class="trade-info-label">Ордер ID</div><div class="trade-info-value" style="font-size:12px;">${String(orderId).substring(0, 20)}...</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">Символ</div><div class="trade-info-value">${symbol}</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">Сторона</div><div class="trade-info-value ${side}">${side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">Ціна входу</div><div class="trade-info-value">$${parseFloat(price).toFixed(2)}</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">Кількість</div><div class="trade-info-value">${parseFloat(quantity).toFixed(6)}</div></div>
-                <div class="trade-info-item"><div class="trade-info-label">PnL</div><div class="trade-info-value ${pnl >= 0 ? 'buy' : 'sell'}">$${parseFloat(pnl || 0).toFixed(2)}</div></div>
+                <div class="trade-info-item"><div class="trade-info-label">PnL</div><div class="trade-info-value ${pnlVal >= 0 ? 'buy' : 'sell'}">$${pnlVal.toFixed(2)}</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">Час</div><div class="trade-info-value">${new Date(timestamp).toLocaleString()}</div></div>
             `;
 
-            chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...</div>';
+            chartContainer.innerHTML = '<div class="loading-chart">⏳ Завантаження графіка...</div>';
 
             try {
                 const response = await fetch(`/api/trade_chart/${orderId}`);
@@ -1266,83 +1263,184 @@
                     return;
                 }
 
-                // Лінія ціни
-                const timestamps = data.klines.map(k => new Date(k.timestamp).toLocaleString());
-                const prices = data.klines.map(k => k.close);
+                // --- Парсимо timestamps ---
+                // Бекенд повертає time_iso (ISO string UTC) для свічок
+                // entry_point / exit_point мають timestamp як ISO string (локальний час БД)
+                function parseToDate(val) {
+                    if (!val) return null;
+                    // Якщо число — Unix ms
+                    if (typeof val === 'number') return new Date(val);
+                    // ISO рядок
+                    const s = String(val);
+                    // Якщо немає timezone суфікса — вважаємо UTC (Bybit) або локальним
+                    // Додаємо 'Z' тільки якщо немає ніякого tz offset
+                    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)) {
+                        // Рядки з БД зберігаються в локальному часі сервера — НЕ додаємо Z
+                        return new Date(s);
+                    }
+                    return new Date(s);
+                }
 
-                const traces = [{
-                    x: timestamps,
-                    y: prices,
+                // Свічки — використовуємо time_iso (UTC від Bybit)
+                const klineDates = data.klines.map(k => {
+                    // time_iso — UTC рядок без tz, додаємо Z щоб браузер розпізнав як UTC
+                    return new Date(k.time_iso + 'Z');
+                });
+                const klinePrices = data.klines.map(k => parseFloat(k.close));
+
+                // Вирівнюємо entry/exit timestamps до тієї ж timezone логіки
+                const entryDate = parseToDate(data.entry_point.timestamp);
+                const entryPrice = parseFloat(data.entry_point.price);
+
+                // Визначаємо реальний діапазон осі X (±5% від крайніх точок)
+                const allDates = [...klineDates];
+                if (entryDate) allDates.push(entryDate);
+
+                let exitDate = null;
+                let exitPrice = null;
+                if (data.exit_point) {
+                    exitDate = parseToDate(data.exit_point.timestamp);
+                    exitPrice = parseFloat(data.exit_point.price);
+                    if (exitDate) allDates.push(exitDate);
+                }
+
+                // Попередження якщо угода поза діапазоном свічок
+                const outOfRange = data.out_of_range;
+                if (outOfRange) {
+                    chartContainer.innerHTML = `
+                        <div style="background:#ff880022; border:1px solid #ff8800; padding:10px; border-radius:8px; margin-bottom:10px; color:#ff8800;">
+                            ⚠️ Ця угода відбулась давно. Свічки за той час недоступні через обмеження Bybit API (безкоштовний tier повертає лише останні ~8 годин для 1-хв таймфрейму). Показано поточні свічки з позначками цін.
+                        </div>
+                        <div id="tradeChart" style="width:100%;height:420px;"></div>
+                    `;
+                } else {
+                    chartContainer.innerHTML = '<div id="tradeChart" style="width:100%;height:420px;"></div>';
+                }
+
+                const traces = [];
+
+                // 1. Лінія ціни (свічки close)
+                traces.push({
+                    x: klineDates,
+                    y: klinePrices,
                     type: 'scatter',
                     mode: 'lines',
                     name: 'Ціна',
-                    line: { color: '#00d4ff', width: 2 }
-                }];
-
-                // Точка входу
-                const entryTime = new Date(data.entry_point.timestamp).toLocaleString();
-                const entryPrice = data.entry_point.price;
-
-                traces.push({
-                    x: [entryTime],
-                    y: [entryPrice],
-                    type: 'scatter',
-                    mode: 'markers',
-                    name: '🟢 ВХІД',
-                    marker: { color: '#00ff88', size: 14, symbol: 'circle' }
+                    line: { color: '#00d4ff', width: 2 },
+                    hovertemplate: '%{x|%H:%M:%S}<br>$%{y:.2f}<extra>Ціна</extra>'
                 });
 
-                // Точка виходу (якщо є)
-                if (data.exit_point) {
-                    const exitTime = new Date(data.exit_point.timestamp).toLocaleString();
-                    const exitPrice = data.exit_point.price;
+                // 2. Точка входу
+                traces.push({
+                    x: [entryDate],
+                    y: [entryPrice],
+                    type: 'scatter',
+                    mode: 'markers+text',
+                    name: '🟢 ВХІД',
+                    marker: { color: '#00ff88', size: 14, symbol: 'circle', line: { color: '#fff', width: 2 } },
+                    text: [`ВХІД $${entryPrice.toFixed(2)}`],
+                    textposition: 'top center',
+                    textfont: { color: '#00ff88', size: 11 },
+                    hovertemplate: `ВХІД<br>${entryDate ? entryDate.toLocaleString() : ''}<br>$${entryPrice.toFixed(2)}<extra></extra>`
+                });
+
+                // 3. Точка виходу + лінія тренду
+                if (exitDate && exitPrice) {
                     const pnlPercent = ((exitPrice - entryPrice) / entryPrice * 100).toFixed(2);
+                    const pnlPositive = parseFloat(pnlPercent) >= 0;
 
                     traces.push({
-                        x: [exitTime],
+                        x: [exitDate],
                         y: [exitPrice],
                         type: 'scatter',
-                        mode: 'markers',
+                        mode: 'markers+text',
                         name: '🔴 ВИХІД',
-                        marker: { color: '#ff4444', size: 14, symbol: 'circle' }
+                        marker: { color: '#ff4444', size: 14, symbol: 'circle', line: { color: '#fff', width: 2 } },
+                        text: [`ВИХІД $${exitPrice.toFixed(2)}`],
+                        textposition: 'bottom center',
+                        textfont: { color: '#ff4444', size: 11 },
+                        hovertemplate: `ВИХІД<br>${exitDate.toLocaleString()}<br>$${exitPrice.toFixed(2)}<extra></extra>`
                     });
 
+                    // Лінія між входом і виходом
                     traces.push({
-                        x: [entryTime, exitTime],
+                        x: [entryDate, exitDate],
                         y: [entryPrice, exitPrice],
                         type: 'scatter',
                         mode: 'lines',
-                        name: '📈 Тренд',
-                        line: { color: '#ffaa00', width: 2, dash: 'dash' }
+                        name: 'Тренд угоди',
+                        line: { color: pnlPositive ? '#00ff88' : '#ff4444', width: 2, dash: 'dash' },
+                        hoverinfo: 'skip'
                     });
 
-                    // Додаємо текст з PnL на графік
+                    // Мітка PnL посередині
+                    const midDate = new Date((entryDate.getTime() + exitDate.getTime()) / 2);
+                    const midPrice = (entryPrice + exitPrice) / 2;
                     traces.push({
-                        x: [(new Date((new Date(entryTime).getTime() + new Date(exitTime).getTime()) / 2)).toLocaleString()],
-                        y: [(entryPrice + exitPrice) / 2],
+                        x: [midDate],
+                        y: [midPrice],
                         type: 'scatter',
                         mode: 'text',
                         name: 'PnL',
-                        text: [`${pnlPercent >= 0 ? '✅' : '❌'} ${pnlPercent}%`],
-                        textfont: { color: pnlPercent >= 0 ? '#00ff88' : '#ff4444', size: 12 }
+                        text: [`${pnlPositive ? '✅' : '❌'} ${pnlPercent}%`],
+                        textfont: { color: pnlPositive ? '#00ff88' : '#ff4444', size: 13 },
+                        showlegend: false,
+                        hoverinfo: 'skip'
                     });
                 }
 
+                // Обчислюємо діапазон осі Y з відступом
+                const allPrices = [...klinePrices, entryPrice];
+                if (exitPrice) allPrices.push(exitPrice);
+                const minP = Math.min(...allPrices);
+                const maxP = Math.max(...allPrices);
+                const pad = (maxP - minP) * 0.05 || maxP * 0.001;
+
+                // Обчислюємо діапазон осі X з відступом
+                const minDate = new Date(Math.min(...allDates.map(d => d.getTime())) - 2 * 60000);
+                const maxDate = new Date(Math.max(...allDates.map(d => d.getTime())) + 2 * 60000);
+
                 const layout = {
-                    title: `${symbol} — ${data.exit_point ? 'Закрита угода' : 'Відкрита угода'}`,
+                    title: {
+                        text: `${symbol} — ${data.exit_point ? 'Закрита угода' : 'Відкрита позиція'}`,
+                        font: { color: '#e0e0e0', size: 16 }
+                    },
                     paper_bgcolor: '#1a1a2e',
                     plot_bgcolor: '#1a1a2e',
                     font: { color: '#e0e0e0' },
-                    xaxis: { title: 'Час', tickangle: -45, gridcolor: '#2a2a4a' },
-                    yaxis: { title: 'Ціна (USDT)', gridcolor: '#2a2a4a' },
-                    height: 450,
-                    margin: { l: 60, r: 40, t: 50, b: 100 }
+                    xaxis: {
+                        title: 'Час',
+                        tickangle: -45,
+                        gridcolor: '#2a2a4a',
+                        type: 'date',
+                        range: [minDate, maxDate],
+                        tickformat: '%H:%M\n%d.%m',
+                        color: '#e0e0e0'
+                    },
+                    yaxis: {
+                        title: 'Ціна (USDT)',
+                        gridcolor: '#2a2a4a',
+                        range: [minP - pad, maxP + pad],
+                        color: '#e0e0e0',
+                        tickprefix: '$'
+                    },
+                    height: 420,
+                    margin: { l: 70, r: 30, t: 60, b: 80 },
+                    legend: {
+                        bgcolor: '#0f0f1a',
+                        bordercolor: '#2a2a4a',
+                        borderwidth: 1
+                    },
+                    hovermode: 'closest'
                 };
 
-                Plotly.newPlot(chartContainer, traces, layout, { responsive: true });
+                const chartDiv = document.getElementById('tradeChart');
+                if (chartDiv) {
+                    Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
+                }
 
             } catch(e) {
-                console.error('Помилка:', e);
+                console.error('Помилка showTradeChart:', e);
                 chartContainer.innerHTML = '<div class="loading-chart">❌ Помилка завантаження графіка</div>';
             }
         }
