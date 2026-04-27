@@ -123,16 +123,41 @@ class NewsStrategy(BaseStrategy):
     async def fetch_news(self) -> List[dict]:
         if not self.news_api_key:
             return []
+
+        from datetime import datetime, timedelta
+
         query = ' OR '.join(f'"{s}" cryptocurrency' for s in self.symbols)
-        params = {'q': query, 'language': 'en', 'sortBy': 'publishedAt', 'pageSize': 20, 'apiKey': self.news_api_key}
+        params = {
+            'q': query,
+            'language': 'en',
+            'sortBy': 'publishedAt',
+            'pageSize': 20,
+            'apiKey': self.news_api_key
+        }
+
         try:
             resp = requests.get("https://newsapi.org/v2/everything", params=params, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
                 articles = data.get('articles', [])
-                self.articles_count = len(articles)
-                logger.info(f"Отримано {len(articles)} новин")
-                return articles
+
+                # Фільтруємо новини за останні 2 години
+                cutoff_time = datetime.now() - timedelta(hours=2)
+                new_articles = []
+
+                for article in articles:
+                    published_at = article.get('publishedAt', '')
+                    if published_at:
+                        try:
+                            pub_time = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
+                            if pub_time > cutoff_time:
+                                new_articles.append(article)
+                        except:
+                            new_articles.append(article)  # якщо не можемо розпарсити - додаємо
+
+                self.articles_count = len(new_articles)
+                logger.info(f"Отримано {len(articles)} новин, за останні 2 години: {len(new_articles)}")
+                return new_articles
             else:
                 logger.error(f"NewsAPI помилка {resp.status_code}")
                 return []
