@@ -394,6 +394,112 @@ def create_flask_app(config, trading_engine):
                 })
         return jsonify({'error': 'Strategy not found'}), 404
 
+    # ============= НОВЕ: ЛОГИ API (БД) =============
+
+    @app.route('/api/logs')
+    @async_route
+    async def api_logs():
+        """Отримання логів з БД з пагінацією"""
+        from database.db import get_logs, get_logs_count
+
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 50, type=int)
+        module = request.args.get('module', 'all')
+        level = request.args.get('level', 'all')
+
+        if per_page > 100:
+            per_page = 100
+        if page < 1:
+            page = 1
+
+        offset = (page - 1) * per_page
+        total = get_logs_count(module, level)
+
+        logs = get_logs(module, level, per_page, offset)
+
+        return jsonify({
+            'logs': logs,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total + per_page - 1) // per_page if total > 0 else 1
+        })
+
+    @app.route('/api/log_modules')
+    @async_route
+    async def api_log_modules():
+        """Отримання списку модулів для фільтрації"""
+        from database.db import get_db
+
+        with get_db() as conn:
+            cursor = conn.execute("SELECT DISTINCT module FROM logs ORDER BY module")
+            modules = [row['module'] for row in cursor.fetchall()]
+
+        # Додаємо модулі з налаштувань які ще не мають логів
+        from database.db import get_log_settings
+        settings = get_log_settings()
+        for module in settings.keys():
+            if module not in modules:
+                modules.append(module)
+
+        return jsonify(sorted(modules))
+
+    @app.route('/api/log_settings')
+    @async_route
+    async def api_log_settings():
+        """Отримання налаштувань логування"""
+        from database.db import get_log_settings, get_log_retention_days
+
+        return jsonify({
+            'modules': get_log_settings(),
+            'retention_days': get_log_retention_days()
+        })
+
+    @app.route('/api/log_settings', methods=['POST'])
+    @async_route
+    async def api_update_log_settings():
+        """Оновлення налаштувань логування"""
+        from database.db import update_log_settings, set_log_retention_days
+        from utils.logger_utils import update_log_level
+        import psutil
+
+        data = request.get_json()
+
+        if 'module' in data and 'level' in data:
+            success = update_log_level(data['module'], data['level'])
+            return jsonify({'success': success})
+
+        if 'retention_days' in data:
+            days = int(data['retention_days'])
+            if 1 <= days <= 90:
+                set_log_retention_days(days)
+                return jsonify({'success': True, 'retention_days': days})
+
+        return jsonify({'error': 'Invalid parameters'}), 400
+
+    @app.route('/api/clear_logs', methods=['POST'])
+    @async_route
+    async def api_clear_logs():
+        """Очищення логів"""
+        try:
+            with get_db() as conn:
+                conn.execute("DELETE FROM logs")
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/cleanup_logs', methods=['POST'])
+    @async_route
+    async def api_cleanup_logs():
+        """Очищення старих логів"""
+        from database.db import cleanup_old_logs
+
+        data = request.get_json()
+        days = data.get('retention_days', 7)
+
+        deleted = cleanup_old_logs(days)
+        return jsonify({'success': True, 'deleted': deleted})
+
     # ============= Grid API =============
 
     @app.route('/api/grid_levels/<symbol>')
@@ -595,15 +701,7 @@ def create_flask_app(config, trading_engine):
         klines = await trading_engine.exchange.get_klines(symbol, interval, limit)
         return jsonify(klines)
 
-    @app.route('/api/clear_logs', methods=['POST'])
-    @async_route
-    async def api_clear_logs():
-        try:
-            with get_db() as conn:
-                conn.execute("DELETE FROM logs")
-            return jsonify({'success': True})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+
 
     # ============= Режим роботи API =============
 

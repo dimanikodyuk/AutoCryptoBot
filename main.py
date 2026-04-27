@@ -79,9 +79,6 @@ class CryptoBot:
         self.flask_thread = threading.Thread(target=self._run_flask, daemon=True)
         self.flask_thread.start()
 
-        # Запускаємо фоновий процес очищення
-        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
-
         logger.info("Crypto Bot успішно ініціалізовано")
 
     def _run_flask(self):
@@ -91,18 +88,6 @@ class CryptoBot:
             self.flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
         except Exception as e:
             logger.error(f"Помилка запуску Flask: {e}")
-
-    async def _cleanup_loop(self):
-        """Фоновий процес очищення старих даних (раз на добу)"""
-        while self.running:
-            try:
-                await asyncio.sleep(86400)  # 24 години
-                cleanup_old_price_history(max_days=3)
-                logger.info("🔄 Автоматичне очищення price_history виконано")
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Помилка в циклі очищення: {e}")
 
     async def run(self):
         """Запуск бота"""

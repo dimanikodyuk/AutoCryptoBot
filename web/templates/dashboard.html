@@ -428,44 +428,59 @@
             </div>
         </div>
 
-        <!-- Логи -->
+        <!-- Логи (ОНОВЛЕНО: версія з БД) -->
         <div id="tab-logs" class="tab-content">
             <div class="settings-panel">
-                <h3>📋 Фільтри логів</h3>
+                <h3>📋 Фільтри логів (БД)</h3>
                 <div class="settings-row">
                     <label>⚠️ Рівень:</label>
-                    <select id="logLevelFilter">
+                    <select id="logLevelFilter" onchange="loadLogs()">
                         <option value="all">📋 Всі рівні</option>
                         <option value="INFO">✅ INFO</option>
                         <option value="WARNING">⚠️ WARNING</option>
                         <option value="ERROR">❌ ERROR</option>
                     </select>
-                    <label>🎯 Джерело:</label>
-                    <select id="logSourceFilter">
-                        <option value="all">📁 Всі джерела</option>
-                        <option value="main">🐍 Main</option>
-                        <option value="engine">⚙️ Engine</option>
-                        <option value="exchange">🔄 Exchange</option>
-                        <option value="grid">🎯 Grid</option>
-                        <option value="grid_manager">📊 Grid Manager</option>
-                        <option value="scalp">⚡ Scalp</option>
-                        <option value="news">📰 News</option>
-                        <option value="web">🌐 Web</option>
-                        <option value="telegram_bot">🤖 Telegram</option>
-                        <option value="database">🗄️ Database</option>
+
+                    <label>🎯 Модуль:</label>
+                    <select id="logModuleFilter" onchange="loadLogs()">
+                        <option value="all">📁 Всі модулі</option>
                     </select>
-                    <label>🔢 Кількість:</label>
-                    <select id="logLimit">
-                        <option value="50">50</option>
-                        <option value="100" selected>100</option>
+
+                    <label>🔢 На сторінці:</label>
+                    <select id="logPerPage" onchange="loadLogs()">
+                        <option value="20">20</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
                         <option value="200">200</option>
-                        <option value="500">500</option>
                     </select>
+
                     <button class="btn-refresh" onclick="loadLogs()">🔍 Завантажити</button>
-                    <button onclick="clearLogs()" style="background: #dc3545;">🗑️ Очистити</button>
+                    <button onclick="clearAllLogs()" style="background: #dc3545;">🗑️ Очистити всі</button>
                 </div>
             </div>
-            <div id="logsContainer" class="logs-container"><div class="loading">Завантаження логів...</div></div>
+
+            <div class="settings-panel">
+                <h3>⚙️ Налаштування логування</h3>
+                <div class="settings-row">
+                    <label>🗑️ Авто-очищення (днів):</label>
+                    <input type="number" id="logRetentionDays" min="1" max="90" value="7" style="width: 80px;">
+                    <button onclick="updateLogRetention()" style="background: #007bff;">💾 Зберегти</button>
+                    <button onclick="runLogCleanup()" style="background: #ff8800;">🧹 Очистити зараз</button>
+                </div>
+                <div class="settings-row" id="logModulesSettings">
+                    <div class="loading">Завантаження налаштувань...</div>
+                </div>
+            </div>
+
+            <div id="logsContainer" class="logs-container">
+                <div class="loading">Завантаження логів...</div>
+            </div>
+
+            <div class="filter-bar" style="justify-content: center; margin-top: 15px;">
+                <button onclick="loadLogsPage('prev')" id="prevLogPageBtn">← Попередня</button>
+                <span style="margin: 0 15px;" id="logPageInfo">Сторінка 1 з 1</span>
+                <button onclick="loadLogsPage('next')" id="nextLogPageBtn">Наступна →</button>
+            </div>
         </div>
     </div>
 
@@ -496,6 +511,10 @@
         let activeCharts = {};
         let tradeChart = null;
 
+        // Змінні для пагінації логів
+        let currentLogPage = 1;
+        let currentLogTotalPages = 1;
+
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 const tabName = tab.dataset.tab;
@@ -507,7 +526,7 @@
                 if (tabName === 'scalp') loadScalpStrategy();
                 if (tabName === 'news') loadNewsStrategy();
                 if (tabName === 'database') { loadDatabaseInfo(); }
-                if (tabName === 'logs') loadLogs();
+                if (tabName === 'logs') { loadLogModules(); loadLogSettings(); loadLogs(); }
                 if (tabName === 'controls') { loadSystemStatus(); loadElectricity(); loadMode(); loadRealBalance(); }
                 if (tabName === 'backtest') { setDefaultBacktestDates(); }
                 if (tabName === 'metrics') { loadMetrics(); }
@@ -799,11 +818,18 @@
                 const table = document.getElementById('gridOrdersTable');
                 if (!table) return;
                 if (orders.length === 0) { table.innerHTML = '<div class="loading">Немає ордерів</div>'; return; }
-                let html = `<table><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th><th>Дія</th></tr></thead><tbody>`;
+                let html = `<tr><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th><th>Дія</th></tr></thead><tbody>`;
                 for (const o of orders) {
                     html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${o.pnl || 0}, '${o.opened_at}')" style="cursor:pointer;">`;
-                    html += `<td>${new Date(o.opened_at).toLocaleString()}</td><td>${o.symbol}</td><td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td><td>$${parseFloat(o.price).toFixed(2)}</td><td>${parseFloat(o.quantity).toFixed(6)}</td><td>${o.status === 'open' ? '🟢 Відкрито' : (o.status === 'closed' ? '🔒 Закрито' : '❌ Скасовано')}</td><td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td>`;
-                    html += `<td onclick="event.stopPropagation()">${o.status === 'open' ? `<button class="btn-small" onclick="cancelOrder('grid', '${o.symbol}', '${o.order_id}')">❌</button>` : ''}</td></tr>`;
+                    html += `<td>${new Date(o.opened_at).toLocaleString()}</td>`;
+                    html += `<td>${o.symbol}</td>`;
+                    html += `<td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td>`;
+                    html += `<td>$${parseFloat(o.price).toFixed(2)}</td>`;
+                    html += `<td>${parseFloat(o.quantity).toFixed(6)}</td>`;
+                    html += `<td>${o.status === 'open' ? '🟢 Відкрито' : (o.status === 'closed' ? '🔒 Закрито' : '❌ Скасовано')}</td>`;
+                    html += `<td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td>`;
+                    html += `<td onclick="event.stopPropagation()">${o.status === 'open' ? `<button class="btn-small" onclick="cancelOrder('grid', '${o.symbol}', '${o.order_id}')">❌</button>` : ''}<table>`;
+                    html += `</tr>`;
                 }
                 html += `</tbody></table>`;
                 table.innerHTML = html;
@@ -832,6 +858,7 @@
             }
         }
 
+        // ============= SCALP =============
         async function loadScalpStrategy() {
             try {
                 const response = await fetch('/api/scalp_status');
@@ -937,14 +964,7 @@
 
                 for (const o of orders) {
                     const pnlValue = parseFloat(o.pnl || 0);
-                    const orderId = o.order_id;
-                    const symbol = o.symbol;
-                    const sideVal = o.side;
-                    const priceVal = o.price;
-                    const quantityVal = o.quantity;
-                    const openedAt = o.opened_at;
-
-                    html += `<tr onclick="showTradeChart('${orderId}', '${symbol}', '${sideVal}', ${priceVal}, ${quantityVal}, ${pnlValue}, '${openedAt}')" style="cursor:pointer;">`;
+                    html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${pnlValue}, '${o.opened_at}')" style="cursor:pointer;">`;
                     html += `<td>${new Date(o.opened_at).toLocaleString()}</td>`;
                     html += `<td>${o.symbol}</td>`;
                     html += `<td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td>`;
@@ -1040,9 +1060,16 @@
                 let html = `<table><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th></tr></thead><tbody>`;
                 for (const o of orders) {
                     html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${o.pnl || 0}, '${o.opened_at}')" style="cursor:pointer;">`;
-                    html += `<td>${new Date(o.opened_at).toLocaleString()}</td><td>${o.symbol}</td><td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td><td>$${parseFloat(o.price).toFixed(2)}</td><td>${parseFloat(o.quantity).toFixed(6)}</td><td>${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td><td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td></tr>`;
+                    html += `<td>${new Date(o.opened_at).toLocaleString()}</td>`;
+                    html += `<td>${o.symbol}</td>`;
+                    html += `<td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td>`;
+                    html += `<td>$${parseFloat(o.price).toFixed(2)}</td>`;
+                    html += `<td>${parseFloat(o.quantity).toFixed(6)}</td>`;
+                    html += `<td>${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td>`;
+                    html += `<td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td>`;
+                    html += `</tr>`;
                 }
-                html += `</tbody></table>`;
+                html += `</tbody></tr>`;
                 table.innerHTML = html;
             } catch(e) { console.error(e); }
         }
@@ -1132,7 +1159,7 @@
                 const cols=Object.keys(data.rows[0]);
                 let html='<thead><tr>';
                 cols.forEach(c=>html+=`<th onclick="sortDatabaseTable('${c}')">${getTableDisplayName(c)} ${getSortIcon(c)}</th>`);
-                html+='</tr></thead><tbody>';
+                html+='<tr></thead><tbody>';
                 data.rows.forEach(row=>{
                     html+='<tr onclick="handleDbRowClick(this)" data-order-id="'+ (row.order_id || '') +'" data-symbol="'+ (row.symbol || '') +'" data-side="'+ (row.side || '') +'" data-price="'+ (row.price || 0) +'" data-quantity="'+ (row.quantity || 0) +'" data-pnl="'+ (row.pnl || 0) +'" data-opened-at="'+ (row.opened_at || '') +'" style="cursor:pointer;">';
                     cols.forEach(c=>{
@@ -1166,40 +1193,164 @@
         async function loadDatabaseTablePage(dir) { if(dir==='prev'&&currentDbPage>1) { currentDbPage--; await loadDatabaseTable(); } else if(dir==='next'&&currentDbPage<currentDbTotalPages) { currentDbPage++; await loadDatabaseTable(); } }
         async function exportDatabaseTable() { if(!currentDbTable) return; try { const resp=await fetch(`/api/db_table_data/${currentDbTable}?page=1&per_page=10000`); const data=await resp.json(); if(data.error||data.rows.length===0) { alert('Немає даних'); return; } const cols=Object.keys(data.rows[0]); let csv=cols.join(',')+'\n'; data.rows.forEach(row=>{ const vals=cols.map(c=>{ let v=row[c]; if(v===null||v===undefined) return ''; if(typeof v==='string'&&v.includes(',')) return `"${v}"`; return v; }); csv+=vals.join(',')+'\n'; }); const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`${currentDbTable}_export.csv`; a.click(); URL.revokeObjectURL(url); } catch(e) { console.error(e); alert('Помилка експорту'); } }
 
-        // ============= LOGS =============
-        async function loadLogs() {
-            const level = document.getElementById('logLevelFilter').value;
-            const source = document.getElementById('logSourceFilter').value;
-            const limit = document.getElementById('logLimit').value;
+        // ============= LOGS (БД) =============
+
+        async function loadLogModules() {
             try {
-                let url = `/api/logs_file?level=${level}&limit=${limit}`;
-                if (source && source !== 'all') url += `&strategy=${source}`;
-                const response = await fetch(url);
+                const response = await fetch('/api/log_modules');
+                const modules = await response.json();
+                const select = document.getElementById('logModuleFilter');
+                select.innerHTML = '<option value="all">📁 Всі модулі</option>';
+                modules.forEach(m => {
+                    select.innerHTML += `<option value="${m}">${m}</option>`;
+                });
+            } catch(e) { console.error(e); }
+        }
+
+        async function loadLogSettings() {
+            try {
+                const response = await fetch('/api/log_settings');
                 const data = await response.json();
-                const container = document.getElementById('logsContainer');
-                if (data.error) { container.innerHTML = `<div class="loading">❌ Помилка: ${data.error}</div>`; return; }
-                if (!data || data.length === 0) { container.innerHTML = '<div class="loading">📭 Немає логів з вибраними фільтрами</div>'; return; }
-                const grouped = {};
-                for (const log of data) { const src = log.source || 'system'; if (!grouped[src]) grouped[src] = []; grouped[src].push(log); }
-                let html = '';
-                for (const [src, logs] of Object.entries(grouped)) {
-                    const icon = getSourceIcon(src);
-                    html += `<div class="log-group"><h4>${icon} ${src.toUpperCase()}</h4><div style="margin-left: 10px;">`;
-                    for (const log of logs) {
-                        let cls = 'log-info', icon2 = '📘';
-                        if (log.level === 'WARNING') { cls = 'log-warning'; icon2 = '⚠️'; }
-                        if (log.level === 'ERROR') { cls = 'log-error'; icon2 = '❌'; }
-                        html += `<div class="log-entry ${cls}"><span style="color:#888;">${log.timestamp}</span><span class="${cls}">${icon2} [${log.level}]</span><span>${escapeHtml(log.message)}</span></div>`;
-                    }
-                    html += `</div></div>`;
+
+                document.getElementById('logRetentionDays').value = data.retention_days || 7;
+
+                let html = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">';
+                for (const [module, level] of Object.entries(data.modules)) {
+                    html += `
+                        <div style="background: #0f0f1a; padding: 8px 12px; border-radius: 8px;">
+                            <strong>${module}</strong><br>
+                            <select onchange="updateModuleLogLevel('${module}', this.value)">
+                                <option value="INFO" ${level === 'INFO' ? 'selected' : ''}>📘 INFO</option>
+                                <option value="WARNING" ${level === 'WARNING' ? 'selected' : ''}>⚠️ WARNING</option>
+                                <option value="ERROR" ${level === 'ERROR' ? 'selected' : ''}>❌ ERROR</option>
+                            </select>
+                        </div>
+                    `;
                 }
+                html += '</div>';
+                document.getElementById('logModulesSettings').innerHTML = html;
+
+            } catch(e) { console.error(e); }
+        }
+
+        async function updateModuleLogLevel(module, level) {
+            try {
+                const response = await fetch('/api/log_settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ module: module, level: level })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    console.log(`Рівень логування для ${module} змінено на ${level}`);
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        async function updateLogRetention() {
+            const days = document.getElementById('logRetentionDays').value;
+            try {
+                const response = await fetch('/api/log_settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ retention_days: parseInt(days) })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert(`✅ Авто-очищення встановлено на ${days} днів`);
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        async function runLogCleanup() {
+            if (confirm('Видалити всі логи старше вказаного періоду?')) {
+                const days = document.getElementById('logRetentionDays').value;
+                try {
+                    const response = await fetch('/api/cleanup_logs', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ retention_days: parseInt(days) })
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        alert(`✅ Видалено ${data.deleted} старих логів`);
+                        loadLogs();
+                    }
+                } catch(e) { console.error(e); }
+            }
+        }
+
+        async function loadLogs() {
+            currentLogPage = 1;
+            await doLoadLogs();
+        }
+
+        async function loadLogsPage(direction) {
+            if (direction === 'prev' && currentLogPage > 1) {
+                currentLogPage--;
+            } else if (direction === 'next' && currentLogPage < currentLogTotalPages) {
+                currentLogPage++;
+            }
+            await doLoadLogs();
+        }
+
+        async function doLoadLogs() {
+            const level = document.getElementById('logLevelFilter').value;
+            const module = document.getElementById('logModuleFilter').value;
+            const perPage = document.getElementById('logPerPage').value;
+
+            try {
+                const response = await fetch(`/api/logs?page=${currentLogPage}&per_page=${perPage}&module=${module}&level=${level}`);
+                const data = await response.json();
+
+                currentLogTotalPages = data.total_pages;
+                document.getElementById('logPageInfo').innerHTML = `Сторінка ${data.page} з ${data.total_pages}`;
+                document.getElementById('prevLogPageBtn').disabled = data.page <= 1;
+                document.getElementById('nextLogPageBtn').disabled = data.page >= data.total_pages;
+
+                const container = document.getElementById('logsContainer');
+
+                if (data.logs.length === 0) {
+                    container.innerHTML = '<div class="loading">📭 Немає логів</div>';
+                    return;
+                }
+
+                let html = '<div class="orders-table"><table><thead><tr>';
+                html += '<th>Час</th><th>Рівень</th><th>Модуль</th><th>Повідомлення</th>';
+                html += '</tr></thead><tbody>';
+
+                for (const log of data.logs) {
+                    let levelClass = 'log-info';
+                    let levelIcon = '📘';
+                    if (log.level === 'WARNING') { levelClass = 'log-warning'; levelIcon = '⚠️'; }
+                    if (log.level === 'ERROR') { levelClass = 'log-error'; levelIcon = '❌'; }
+
+                    html += `<tr class="${levelClass}">`;
+                    html += `<td>${log.timestamp}</td>`;
+                    html += `<td>${levelIcon} ${log.level}</td>`;
+                    html += `<td><code>${log.module}</code></td>`;
+                    html += `<td>${escapeHtml(log.message)}</td>`;
+                    html += `</tr>`;
+                }
+
+                html += `</tbody></table></div>`;
                 container.innerHTML = html;
-            } catch(e) { console.error(e); document.getElementById('logsContainer').innerHTML = '<div class="loading">❌ Помилка завантаження логів</div>'; }
+
+            } catch(e) {
+                console.error(e);
+                document.getElementById('logsContainer').innerHTML = '<div class="loading">❌ Помилка завантаження логів</div>';
+            }
+        }
+
+        async function clearAllLogs() {
+            if (confirm('⚠️ Очистити ВСІ логи? Цю дію не можна скасувати!')) {
+                await fetch('/api/clear_logs', { method: 'POST' });
+                await loadLogs();
+                alert('✅ Всі логи очищено');
+            }
         }
 
         function escapeHtml(text) { if (!text) return ''; const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
-        function getSourceIcon(s) { const icons={'__main__':'🐍','trading.engine':'⚙️','grid':'🎯','scalp':'⚡','news':'📰','telegram_bot':'🤖','web.app':'🌐','database.db':'🗄️','system':'🖥️'}; return icons[s]||'📋'; }
-        async function clearLogs() { if(confirm('Очистити логи?')) { await fetch('/api/clear_logs',{method:'POST'}); loadLogs(); } }
 
         // ============= SYSTEM =============
         async function loadSystemStatus() {
@@ -1212,6 +1363,7 @@
                 document.getElementById('botUptime').innerHTML=data.uptime||'-';
             } catch(e) { console.error(e); }
         }
+
         async function loadElectricity() {
             try {
                 const response = await fetch('/api/electricity');
@@ -1225,15 +1377,12 @@
             } catch(e) { console.error(e); }
         }
 
-        // ============= ГРАФІК УГОДИ (PLOTLY) =============
-        let tradeChartInstance = null;
+        // ============= ГРАФІК УГОДИ =============
         async function showTradeChart(orderId, symbol, side, price, quantity, pnl, timestamp) {
             const modal = document.getElementById('tradeModal');
             const tradeInfoDiv = document.getElementById('tradeInfo');
             const chartContainer = document.getElementById('tradeChartContainer');
-
             modal.style.display = 'block';
-
             const pnlVal = parseFloat(pnl || 0);
             tradeInfoDiv.innerHTML = `
                 <div class="trade-info-item"><div class="trade-info-label">Ордер ID</div><div class="trade-info-value" style="font-size:12px;">${String(orderId).substring(0, 20)}...</div></div>
@@ -1244,201 +1393,79 @@
                 <div class="trade-info-item"><div class="trade-info-label">PnL</div><div class="trade-info-value ${pnlVal >= 0 ? 'buy' : 'sell'}">$${pnlVal.toFixed(2)}</div></div>
                 <div class="trade-info-item"><div class="trade-info-label">Час</div><div class="trade-info-value">${new Date(timestamp).toLocaleString()}</div></div>
             `;
-
             chartContainer.innerHTML = '<div class="loading-chart">⏳ Завантаження графіка...</div>';
-
             try {
                 const response = await fetch(`/api/trade_chart/${orderId}`);
                 const data = await response.json();
-
-                console.log('Дані графіка:', data);
-
                 if (data.error) {
                     chartContainer.innerHTML = `<div class="loading-chart">❌ ${data.error}</div>`;
                     return;
                 }
-
                 if (!data.klines || data.klines.length === 0) {
                     chartContainer.innerHTML = '<div class="loading-chart">📭 Немає даних свічок для цієї угоди</div>';
                     return;
                 }
-
-                // --- Парсимо timestamps ---
-                // Бекенд повертає time_iso (ISO string UTC) для свічок
-                // entry_point / exit_point мають timestamp як ISO string (локальний час БД)
                 function parseToDate(val) {
                     if (!val) return null;
-                    // Якщо число — Unix ms
                     if (typeof val === 'number') return new Date(val);
-                    // ISO рядок
                     const s = String(val);
-                    // Якщо немає timezone суфікса — вважаємо UTC (Bybit) або локальним
-                    // Додаємо 'Z' тільки якщо немає ніякого tz offset
-                    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)) {
-                        // Рядки з БД зберігаються в локальному часі сервера — НЕ додаємо Z
-                        return new Date(s);
-                    }
+                    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)) return new Date(s);
                     return new Date(s);
                 }
-
-                // Свічки — використовуємо time_iso (UTC від Bybit)
-                const klineDates = data.klines.map(k => {
-                    // time_iso — UTC рядок без tz, додаємо Z щоб браузер розпізнав як UTC
-                    return new Date(k.time_iso + 'Z');
-                });
+                const klineDates = data.klines.map(k => new Date(k.time_iso + 'Z'));
                 const klinePrices = data.klines.map(k => parseFloat(k.close));
-
-                // Вирівнюємо entry/exit timestamps до тієї ж timezone логіки
                 const entryDate = parseToDate(data.entry_point.timestamp);
                 const entryPrice = parseFloat(data.entry_point.price);
-
-                // Визначаємо реальний діапазон осі X (±5% від крайніх точок)
                 const allDates = [...klineDates];
                 if (entryDate) allDates.push(entryDate);
-
-                let exitDate = null;
-                let exitPrice = null;
+                let exitDate = null, exitPrice = null;
                 if (data.exit_point) {
                     exitDate = parseToDate(data.exit_point.timestamp);
                     exitPrice = parseFloat(data.exit_point.price);
                     if (exitDate) allDates.push(exitDate);
                 }
-
-                // Попередження якщо угода поза діапазоном свічок
                 const outOfRange = data.out_of_range;
                 if (outOfRange) {
-                    chartContainer.innerHTML = `
-                        <div style="background:#ff880022; border:1px solid #ff8800; padding:10px; border-radius:8px; margin-bottom:10px; color:#ff8800;">
-                            ⚠️ Ця угода відбулась давно. Свічки за той час недоступні через обмеження Bybit API (безкоштовний tier повертає лише останні ~8 годин для 1-хв таймфрейму). Показано поточні свічки з позначками цін.
-                        </div>
-                        <div id="tradeChart" style="width:100%;height:420px;"></div>
-                    `;
+                    chartContainer.innerHTML = `<div style="background:#ff880022; border:1px solid #ff8800; padding:10px; border-radius:8px; margin-bottom:10px; color:#ff8800;">⚠️ Ця угода відбулась давно. Свічки за той час недоступні через обмеження Bybit API. Показано поточні свічки з позначками цін.</div><div id="tradeChart" style="width:100%;height:420px;"></div>`;
                 } else {
                     chartContainer.innerHTML = '<div id="tradeChart" style="width:100%;height:420px;"></div>';
                 }
-
-                const traces = [];
-
-                // 1. Лінія ціни (свічки close)
-                traces.push({
-                    x: klineDates,
-                    y: klinePrices,
-                    type: 'scatter',
-                    mode: 'lines',
-                    name: 'Ціна',
-                    line: { color: '#00d4ff', width: 2 },
-                    hovertemplate: '%{x|%H:%M:%S}<br>$%{y:.2f}<extra>Ціна</extra>'
-                });
-
-                // 2. Точка входу
-                traces.push({
-                    x: [entryDate],
-                    y: [entryPrice],
-                    type: 'scatter',
-                    mode: 'markers+text',
-                    name: '🟢 ВХІД',
-                    marker: { color: '#00ff88', size: 14, symbol: 'circle', line: { color: '#fff', width: 2 } },
-                    text: [`ВХІД $${entryPrice.toFixed(2)}`],
-                    textposition: 'top center',
-                    textfont: { color: '#00ff88', size: 11 },
-                    hovertemplate: `ВХІД<br>${entryDate ? entryDate.toLocaleString() : ''}<br>$${entryPrice.toFixed(2)}<extra></extra>`
-                });
-
-                // 3. Точка виходу + лінія тренду
+                const traces = [{
+                    x: klineDates, y: klinePrices, type: 'scatter', mode: 'lines', name: 'Ціна', line: { color: '#00d4ff', width: 2 }
+                }, {
+                    x: [entryDate], y: [entryPrice], type: 'scatter', mode: 'markers+text', name: '🟢 ВХІД', marker: { color: '#00ff88', size: 14, symbol: 'circle', line: { color: '#fff', width: 2 } }, text: [`ВХІД $${entryPrice.toFixed(2)}`], textposition: 'top center', textfont: { color: '#00ff88', size: 11 }
+                }];
                 if (exitDate && exitPrice) {
                     const pnlPercent = ((exitPrice - entryPrice) / entryPrice * 100).toFixed(2);
                     const pnlPositive = parseFloat(pnlPercent) >= 0;
-
                     traces.push({
-                        x: [exitDate],
-                        y: [exitPrice],
-                        type: 'scatter',
-                        mode: 'markers+text',
-                        name: '🔴 ВИХІД',
-                        marker: { color: '#ff4444', size: 14, symbol: 'circle', line: { color: '#fff', width: 2 } },
-                        text: [`ВИХІД $${exitPrice.toFixed(2)}`],
-                        textposition: 'bottom center',
-                        textfont: { color: '#ff4444', size: 11 },
-                        hovertemplate: `ВИХІД<br>${exitDate.toLocaleString()}<br>$${exitPrice.toFixed(2)}<extra></extra>`
+                        x: [exitDate], y: [exitPrice], type: 'scatter', mode: 'markers+text', name: '🔴 ВИХІД', marker: { color: '#ff4444', size: 14, symbol: 'circle', line: { color: '#fff', width: 2 } }, text: [`ВИХІД $${exitPrice.toFixed(2)}`], textposition: 'bottom center', textfont: { color: '#ff4444', size: 11 }
                     });
-
-                    // Лінія між входом і виходом
                     traces.push({
-                        x: [entryDate, exitDate],
-                        y: [entryPrice, exitPrice],
-                        type: 'scatter',
-                        mode: 'lines',
-                        name: 'Тренд угоди',
-                        line: { color: pnlPositive ? '#00ff88' : '#ff4444', width: 2, dash: 'dash' },
-                        hoverinfo: 'skip'
+                        x: [entryDate, exitDate], y: [entryPrice, exitPrice], type: 'scatter', mode: 'lines', name: 'Тренд угоди', line: { color: pnlPositive ? '#00ff88' : '#ff4444', width: 2, dash: 'dash' }, hoverinfo: 'skip'
                     });
-
-                    // Мітка PnL посередині
                     const midDate = new Date((entryDate.getTime() + exitDate.getTime()) / 2);
                     const midPrice = (entryPrice + exitPrice) / 2;
                     traces.push({
-                        x: [midDate],
-                        y: [midPrice],
-                        type: 'scatter',
-                        mode: 'text',
-                        name: 'PnL',
-                        text: [`${pnlPositive ? '✅' : '❌'} ${pnlPercent}%`],
-                        textfont: { color: pnlPositive ? '#00ff88' : '#ff4444', size: 13 },
-                        showlegend: false,
-                        hoverinfo: 'skip'
+                        x: [midDate], y: [midPrice], type: 'scatter', mode: 'text', name: 'PnL', text: [`${pnlPositive ? '✅' : '❌'} ${pnlPercent}%`], textfont: { color: pnlPositive ? '#00ff88' : '#ff4444', size: 13 }, showlegend: false, hoverinfo: 'skip'
                     });
                 }
-
-                // Обчислюємо діапазон осі Y з відступом
                 const allPrices = [...klinePrices, entryPrice];
                 if (exitPrice) allPrices.push(exitPrice);
                 const minP = Math.min(...allPrices);
                 const maxP = Math.max(...allPrices);
                 const pad = (maxP - minP) * 0.05 || maxP * 0.001;
-
-                // Обчислюємо діапазон осі X з відступом
                 const minDate = new Date(Math.min(...allDates.map(d => d.getTime())) - 2 * 60000);
                 const maxDate = new Date(Math.max(...allDates.map(d => d.getTime())) + 2 * 60000);
-
                 const layout = {
-                    title: {
-                        text: `${symbol} — ${data.exit_point ? 'Закрита угода' : 'Відкрита позиція'}`,
-                        font: { color: '#e0e0e0', size: 16 }
-                    },
-                    paper_bgcolor: '#1a1a2e',
-                    plot_bgcolor: '#1a1a2e',
-                    font: { color: '#e0e0e0' },
-                    xaxis: {
-                        title: 'Час',
-                        tickangle: -45,
-                        gridcolor: '#2a2a4a',
-                        type: 'date',
-                        range: [minDate, maxDate],
-                        tickformat: '%H:%M\n%d.%m',
-                        color: '#e0e0e0'
-                    },
-                    yaxis: {
-                        title: 'Ціна (USDT)',
-                        gridcolor: '#2a2a4a',
-                        range: [minP - pad, maxP + pad],
-                        color: '#e0e0e0',
-                        tickprefix: '$'
-                    },
-                    height: 420,
-                    margin: { l: 70, r: 30, t: 60, b: 80 },
-                    legend: {
-                        bgcolor: '#0f0f1a',
-                        bordercolor: '#2a2a4a',
-                        borderwidth: 1
-                    },
-                    hovermode: 'closest'
+                    title: { text: `${symbol} — ${data.exit_point ? 'Закрита угода' : 'Відкрита позиція'}`, font: { color: '#e0e0e0', size: 16 } },
+                    paper_bgcolor: '#1a1a2e', plot_bgcolor: '#1a1a2e', font: { color: '#e0e0e0' },
+                    xaxis: { title: 'Час', tickangle: -45, gridcolor: '#2a2a4a', type: 'date', range: [minDate, maxDate], tickformat: '%H:%M\n%d.%m', color: '#e0e0e0' },
+                    yaxis: { title: 'Ціна (USDT)', gridcolor: '#2a2a4a', range: [minP - pad, maxP + pad], color: '#e0e0e0', tickprefix: '$' },
+                    height: 420, margin: { l: 70, r: 30, t: 60, b: 80 }, legend: { bgcolor: '#0f0f1a', bordercolor: '#2a2a4a', borderwidth: 1 }, hovermode: 'closest'
                 };
-
                 const chartDiv = document.getElementById('tradeChart');
-                if (chartDiv) {
-                    Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
-                }
-
+                if (chartDiv) Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
             } catch(e) {
                 console.error('Помилка showTradeChart:', e);
                 chartContainer.innerHTML = '<div class="loading-chart">❌ Помилка завантаження графіка</div>';
@@ -1456,7 +1483,6 @@
             const modal = document.getElementById('tradeModal');
             if (event.target === modal) closeTradeModal();
         }
-
 
         // ============= ACTIONS =============
         async function toggleStrategy(id) { await fetch(`/api/strategy/${id}/toggle`,{method:'POST'}); loadAllData(); loadGridStrategy(); loadScalpStrategy(); }
@@ -1556,12 +1582,12 @@
         function displayOptimizationResults(results) {
             document.getElementById('optimizationResults').style.display = 'block';
             if (!results || results.length === 0) { document.getElementById('optimizationTable').innerHTML = '<div class="loading">Немає результатів</div>'; return; }
-            let html = `<table><thead><tr><th>Ранг</th><th>Рівнів</th><th>Розмір</th><th>Нижній%</th><th>Верхній%</th><th>PnL</th><th>PnL%</th><th>Угоди</th><th>WinRate</th><th>Drawdown</th><th>Sharpe</th></tr></thead><tbody>`;
+            let html = `</table><thead><tr><th>Ранг</th><th>Рівнів</th><th>Розмір</th><th>Нижній%</th><th>Верхній%</th><th>PnL</th><th>PnL%</th><th>Угоди</th><th>WinRate</th><th>Drawdown</th><th>Sharpe</th></tr></thead><tbody>`;
             results.forEach((r, idx) => {
                 const pnlClass = r.total_pnl >= 0 ? 'stat-positive' : 'stat-negative';
                 html += `<tr><td><strong>#${idx + 1}</strong></td><td>${r.grid_levels}</td><td>$${r.order_size_usdt}</td><td>${r.lower_percent}%</td><td>${r.upper_percent}%</td><td class="${pnlClass}">$${r.total_pnl.toFixed(2)}</td><td class="${pnlClass}">${r.total_pnl_percent.toFixed(2)}%</td><td>${r.total_trades}</td><td>${r.win_rate.toFixed(1)}%</td><td class="stat-negative">${r.max_drawdown.toFixed(2)}%</td><td>${r.sharpe_ratio.toFixed(2)}</td></tr>`;
             });
-            html += `</tbody></tr>`;
+            html += `</tbody></td>`;
             document.getElementById('optimizationTable').innerHTML = html;
         }
         setDefaultBacktestDates();
