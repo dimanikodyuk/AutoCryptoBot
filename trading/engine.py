@@ -104,7 +104,7 @@ class TradingEngine:
     def set_telegram_bot(self, telegram_bot):
         self.telegram_bot = telegram_bot
         for strategy in self.strategies.values():
-            strategy.telegram_bot = telegram_bot
+            strategy.telegram_bot = telegram_bot  # ← Це має бути
 
     async def stop_strategy(self, strategy_id: int):
         """Зупинка конкретної стратегії"""

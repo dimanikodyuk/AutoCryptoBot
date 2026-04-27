@@ -941,14 +941,21 @@
 
                 for (const o of orders) {
                     const pnlValue = parseFloat(o.pnl || 0);
-                    html += `<tr>`;
-                    html += `<td onclick="event.stopPropagation()">${new Date(o.opened_at).toLocaleString()}</td>`;
-                    html += `<td onclick="event.stopPropagation()">${o.symbol}</td>`;
-                    html += `<td class="${o.side}" onclick="event.stopPropagation()">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td>`;
-                    html += `<td onclick="event.stopPropagation()">$${parseFloat(o.price).toFixed(2)}</td>`;
-                    html += `<td onclick="event.stopPropagation()">${parseFloat(o.quantity).toFixed(6)}</td>`;
-                    html += `<td onclick="event.stopPropagation()">${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td>`;
-                    html += `<td class="${pnlValue >= 0 ? 'stat-positive' : 'stat-negative'}" onclick="event.stopPropagation()">$${pnlValue.toFixed(2)}</td>`;
+                    const orderId = o.order_id;
+                    const symbol = o.symbol;
+                    const sideVal = o.side;
+                    const priceVal = o.price;
+                    const quantityVal = o.quantity;
+                    const openedAt = o.opened_at;
+
+                    html += `<tr onclick="showTradeChart('${orderId}', '${symbol}', '${sideVal}', ${priceVal}, ${quantityVal}, ${pnlValue}, '${openedAt}')" style="cursor:pointer;">`;
+                    html += `<td>${new Date(o.opened_at).toLocaleString()}</td>`;
+                    html += `<td>${o.symbol}</td>`;
+                    html += `<td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td>`;
+                    html += `<td>$${parseFloat(o.price).toFixed(2)}</td>`;
+                    html += `<td>${parseFloat(o.quantity).toFixed(6)}</td>`;
+                    html += `<td>${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td>`;
+                    html += `<td class="${pnlValue >= 0 ? 'stat-positive' : 'stat-negative'}">$${pnlValue.toFixed(2)}</td>`;
                     html += `</tr>`;
                 }
 
@@ -956,25 +963,8 @@
                 </table>`;
                 table.innerHTML = html;
 
-                // Додаємо обробник кліку на весь рядок після вставки HTML
-                const rows = table.querySelectorAll('tbody tr');
-                rows.forEach(row => {
-                    row.style.cursor = 'pointer';
-                    row.addEventListener('click', function(e) {
-                        if (e.target.tagName === 'TD') {
-                            const orderId = this.cells[0].getAttribute('data-order-id') ||
-                                           this.querySelector('td:first-child')?.innerText;
-                            // Знаходимо ордер в даних
-                            const order = orders.find(o => new Date(o.opened_at).toLocaleString() === this.cells[0].innerText);
-                            if (order) {
-                                showTradeChart(order.order_id, order.symbol, order.side, order.price, order.quantity, order.pnl || 0, order.opened_at);
-                            }
-                        }
-                    });
-                });
-
             } catch(e) {
-                console.error(e);
+                console.error('Помилка loadScalpOrders:', e);
             }
         }
 

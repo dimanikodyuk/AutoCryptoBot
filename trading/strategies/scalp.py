@@ -78,6 +78,8 @@ class ScalpStrategy(BaseStrategy):
         self.last_update: Dict[str, datetime] = {}
         self._analysis_task = None
 
+        self.telegram_bot = None
+
         self._load_history()
 
         logger.info(f"ScalpStrategy ініціалізовано для пар: {self.symbols}")

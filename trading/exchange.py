@@ -62,23 +62,36 @@ class BybitExchange:
         }
         interval_key = interval_map.get(str(interval), '1')
         url = f"{self.config.BYBIT_REST_URL}/v5/market/kline"
-        params = {'category': 'spot', 'symbol': symbol, 'interval': interval_key, 'limit': limit}
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params) as response:
-                    data = await response.json()
-                    if data.get('retCode') == 0:
-                        klines = []
-                        for k in data['result']['list']:
-                            klines.append({
-                                'timestamp': int(k[0]), 'open': float(k[1]), 'high': float(k[2]),
-                                'low': float(k[3]), 'close': float(k[4]), 'volume': float(k[5])
-                            })
-                        return klines
+        params = {'category': 'spot', 'symbol': symbol, 'interval': interval_key, 'limit': min(limit, 1000)}
+
+        # Повторні спроби при помилці
+        for attempt in range(3):
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)  # 10 секунд таймаут
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(url, params=params) as response:
+                        data = await response.json()
+                        if data.get('retCode') == 0:
+                            klines = []
+                            for k in data['result']['list']:
+                                klines.append({
+                                    'timestamp': int(k[0]), 'open': float(k[1]), 'high': float(k[2]),
+                                    'low': float(k[3]), 'close': float(k[4]), 'volume': float(k[5])
+                                })
+                            return klines
+                        return []
+            except asyncio.TimeoutError:
+                logger.warning(f"Таймаут отримання свічок {symbol}, спроба {attempt + 1}/3")
+                if attempt == 2:
+                    logger.error(f"Не вдалося отримати свічки {symbol} після 3 спроб")
                     return []
-        except Exception as e:
-            logger.error(f"Помилка свічок {symbol}: {e}")
-            return []
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"Помилка свічок {symbol}: {e}")
+                if attempt == 2:
+                    return []
+                await asyncio.sleep(1)
+        return []
 
     async def get_real_balance(self, asset: str = 'USDT') -> float:
         """Отримання реального балансу з Bybit"""
