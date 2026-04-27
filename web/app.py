@@ -741,6 +741,129 @@ def create_flask_app(config, trading_engine):
 
         return jsonify(prices)
 
+    # Додайте ці ендпоінти в web/app.py
+
+    @app.route('/api/signals/add', methods=['POST'])
+    @async_route
+    async def api_add_signal():
+        """Додавання нового сигналу"""
+        data = request.get_json()
+
+        # Отримуємо стратегію signals
+        signals_strategy = None
+        for strategy in trading_engine.strategies.values():
+            if strategy.name == 'signals':
+                signals_strategy = strategy
+                break
+
+        if not signals_strategy:
+            return jsonify({'error': 'Signals strategy not found'}), 404
+
+        # Парсимо текст або використовуємо готові дані
+        if 'text' in data:
+            parsed = signals_strategy.parse_signal_text(data['text'])
+            if not parsed:
+                return jsonify({'error': 'Failed to parse signal text'}), 400
+            signal_data = parsed
+            signal_data['trade_size_usdt'] = data.get('trade_size_usdt', 20)
+        else:
+            signal_data = {
+                'symbol': data.get('symbol'),
+                'signal_type': data.get('signal_type'),
+                'entry_price': data.get('entry_price'),
+                'entry_limit': data.get('entry_limit'),
+                'stop_loss': data.get('stop_loss'),
+                'take_profits': data.get('take_profits', []),
+                'trade_size_usdt': data.get('trade_size_usdt', 20)
+            }
+
+        # Валідація
+        required_fields = ['symbol', 'signal_type', 'entry_price', 'stop_loss', 'take_profits']
+        for field in required_fields:
+            if not signal_data.get(field):
+                return jsonify({'error': f'Missing field: {field}'}), 400
+
+        signal = await signals_strategy.add_signal(signal_data)
+        if signal:
+            return jsonify({
+                'success': True,
+                'signal_id': signal.id,
+                'message': f'Signal added: {signal.signal_type} {signal.symbol}'
+            })
+        else:
+            return jsonify({'error': 'Failed to add signal'}), 500
+
+    @app.route('/api/signals/close/<signal_id>', methods=['POST'])
+    @async_route
+    async def api_close_signal(signal_id):
+        """Ручне закриття сигналу"""
+        data = request.get_json() or {}
+        price = data.get('price')
+
+        signals_strategy = None
+        for strategy in trading_engine.strategies.values():
+            if strategy.name == 'signals':
+                signals_strategy = strategy
+                break
+
+        if not signals_strategy:
+            return jsonify({'error': 'Signals strategy not found'}), 404
+
+        success = await signals_strategy.manual_close(signal_id, price)
+        if success:
+            return jsonify({'success': True, 'message': 'Position closed'})
+        else:
+            return jsonify({'error': 'Signal not found or already closed'}), 404
+
+    @app.route('/api/signals/active')
+    @async_route
+    async def api_get_active_signals():
+        """Отримання активних сигналів"""
+        for strategy in trading_engine.strategies.values():
+            if strategy.name == 'signals':
+                status = await strategy.get_status()
+                return jsonify(status.get('active_signals', []))
+        return jsonify([])
+
+    @app.route('/api/signals/history')
+    @async_route
+    async def api_get_signals_history():
+        """Отримання історії сигналів"""
+        limit = request.args.get('limit', 50, type=int)
+
+        from database.db import get_db
+
+        with get_db() as conn:
+            # Отримуємо ID стратегії signals
+            strategy = conn.execute(
+                "SELECT id FROM strategies WHERE name = 'signals'"
+            ).fetchone()
+
+            if not strategy:
+                return jsonify([])
+
+            # Отримуємо історію з таблиці signals
+            signals = conn.execute("""
+                SELECT s.*, o.pnl, o.closed_price
+                FROM signals s
+                LEFT JOIN orders o ON s.order_id = o.order_id
+                WHERE s.strategy_id = ?
+                ORDER BY s.created_at DESC
+                LIMIT ?
+            """, (strategy['id'], limit)).fetchall()
+
+            return jsonify([dict(s) for s in signals])
+
+    @app.route('/api/signals/status')
+    @async_route
+    async def api_signals_status():
+        """Отримання статусу signals стратегії"""
+        for strategy in trading_engine.strategies.values():
+            if strategy.name == 'signals':
+                status = await strategy.get_status()
+                return jsonify(status)
+        return jsonify({'error': 'Strategy not found'}), 404
+
     # ============= База даних API =============
 
     @app.route('/api/db_tables_list')

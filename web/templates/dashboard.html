@@ -364,6 +364,7 @@
         <div class="tab" data-tab="grid">🎯 Grid Стратегія</div>
         <div class="tab" data-tab="scalp">⚡ Скальпінг</div>
         <div class="tab" data-tab="news">📰 Новинна Стратегія</div>
+        <div class="tab" data-tab="signals">📡 Сигнали</div>
         <div class="tab" data-tab="controls">⚙️ Керування</div>
         <div class="tab" data-tab="backtest">📊 Бектестинг</div>
         <div class="tab" data-tab="metrics">📈 Метрики</div>
@@ -456,7 +457,64 @@
         <div id="tab-news" class="tab-content">
             <div id="newsContent"><div class="loading">Завантаження новин...</div></div>
         </div>
+        <!-- Вкладка Сигнали -->
+<div id="tab-signals" class="tab-content">
+    <div class="settings-panel">
+        <h3>📡 Додати новий сигнал</h3>
+        <div class="settings-row">
+            <textarea id="signalText" rows="3" placeholder="Вставте текст сигналу з Telegram або введіть дані вручну...
 
+Приклад:
+🔴 SHORT - $MORPHO
+- Entry: 1.8940
+- SL: 2.1464
+🎯 TP1: 1.4891
+🎯 TP2: 1.1206
+🎯 TP3: 0.5632" style="width: 100%; background: #0f0f1a; border: 1px solid #2a2a4a; color: white; padding: 10px; border-radius: 8px;"></textarea>
+        </div>
+        <div class="settings-row" style="margin-top: 10px;">
+            <label>Або введіть вручну:</label>
+        </div>
+        <div class="settings-row">
+            <input type="text" id="manualSymbol" placeholder="Символ (напр. MORPHO)" style="width: 120px;">
+            <select id="manualType">
+                <option value="LONG">🟢 LONG</option>
+                <option value="SHORT">🔴 SHORT</option>
+            </select>
+            <input type="number" id="manualEntry" placeholder="Entry" step="any" style="width: 120px;">
+            <input type="number" id="manualSL" placeholder="Stop Loss" step="any" style="width: 120px;">
+            <input type="text" id="manualTPs" placeholder="TP1, TP2, TP3" style="width: 200px;">
+            <input type="number" id="manualSize" placeholder="Розмір ($)" value="20" step="5" style="width: 100px;">
+            <button class="btn-save" onclick="addManualSignal()">➕ Додати сигнал</button>
+        </div>
+        <div class="settings-row">
+            <button class="btn-refresh" onclick="parseAndAddSignal()">🔍 Розпізнати та додати</button>
+        </div>
+    </div>
+
+    <div class="stats-grid" id="signalsStats">
+        <div class="stat-card"><div class="stat-value" id="signalsBalance">$0</div><div class="stat-label">Баланс</div></div>
+        <div class="stat-card"><div class="stat-value" id="signalsPnl">$0</div><div class="stat-label">Загальний PnL</div></div>
+        <div class="stat-card"><div class="stat-value" id="signalsTrades">0</div><div class="stat-label">Всього угод</div></div>
+        <div class="stat-card"><div class="stat-value" id="signalsWinRate">0%</div><div class="stat-label">Win Rate</div></div>
+        <div class="stat-card"><div class="stat-value" id="signalsActive">0</div><div class="stat-label">Активні сигнали</div></div>
+    </div>
+
+    <h3>📊 Активні позиції</h3>
+    <div class="orders-table" id="activeSignalsTable">
+        <div class="loading">Завантаження...</div>
+    </div>
+
+    <h3>📜 Історія сигналів</h3>
+    <div class="filter-bar">
+        <input type="number" id="signalsHistoryLimit" placeholder="Кількість" value="20">
+        <button onclick="loadSignalsHistory()">📋 Завантажити</button>
+        <button onclick="refreshSignalsData()" class="btn-refresh">🔄 Оновити всі</button>
+    </div>
+    <div class="orders-table" id="signalsHistoryTable">
+        <div class="loading">Завантаження...</div>
+    </div>
+</div>
                <!-- Керування -->
         <div id="tab-controls" class="tab-content">
             <div class="stats-grid" id="systemStats">
@@ -741,6 +799,7 @@
                 if (tabName === 'grid') loadGridStrategy();
                 if (tabName === 'scalp') loadScalpStrategy();
                 if (tabName === 'news') loadNewsStrategy();
+                if (tabName === 'signals') { refreshSignalsData(); }
                 if (tabName === 'database') { loadDatabaseInfo(); }
                 if (tabName === 'logs') { loadLogModules(); loadLogSettings(); loadLogs(); }
                 if (tabName === 'controls') { loadSystemStatus(); loadElectricity(); loadMode(); loadRealBalance(); }
@@ -2450,6 +2509,9 @@ window.refreshPrices = function() {
     updatePricesDisplay();
 };
 
+
+
+
 // Відкриття модального вікна налаштувань
 window.openPricesSettings = function() {
     const modal = document.getElementById('pricesSettingsModal');
@@ -2515,6 +2577,201 @@ window.savePricesSettings = async function() {
         alert('❌ Помилка: ' + e.message);
     }
 };
+
+// ============= СИГНАЛИ =============
+
+async function loadSignalsStatus() {
+    try {
+        const response = await fetch('/api/signals/status');
+        const status = await response.json();
+
+        document.getElementById('signalsBalance').innerHTML = `$${(status.balance || 0).toFixed(2)}`;
+        const pnlElem = document.getElementById('signalsPnl');
+        pnlElem.innerHTML = `$${(status.total_pnl || 0).toFixed(2)}`;
+        pnlElem.className = `stat-value ${(status.total_pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}`;
+        document.getElementById('signalsTrades').innerHTML = status.total_trades || 0;
+        document.getElementById('signalsWinRate').innerHTML = `${status.win_rate || 0}%`;
+        document.getElementById('signalsActive').innerHTML = (status.active_signals || []).length;
+
+        // Активні сигнали
+        const activeTable = document.getElementById('activeSignalsTable');
+        if (status.active_signals && status.active_signals.length > 0) {
+            let html = `<table><thead><tr>
+                <th>Час</th><th>Пара</th><th>Тип</th><th>Entry</th><th>SL</th><th>TP</th><th>Прогрес</th><th>Дія</th>
+            </tr></thead><tbody>`;
+
+            for (const s of status.active_signals) {
+                const progress = `${s.partial_closes}/${s.total_tp}`;
+                html += `<tr>
+                    <td>${new Date().toLocaleTimeString()}</td>
+                    <td><strong>${s.symbol}</strong></td>
+                    <td class="${s.type === 'LONG' ? 'buy' : 'sell'}">${s.type === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</td>
+                    <td>$${s.entry_price.toFixed(8)}</td>
+                    <td class="sell">$${s.stop_loss.toFixed(8)}</td>
+                    <td>${s.take_profits.map(tp => `$${tp.toFixed(8)}`).join('<br>')}</td>
+                    <td>🎯 ${progress}</td>
+                    <td><button class="btn-small" style="background:#dc3545;" onclick="closeSignal('${s.id}')">❌ Закрити</button></td>
+                </tr>`;
+            }
+            html += `</tbody></table>`;
+            activeTable.innerHTML = html;
+        } else {
+            activeTable.innerHTML = '<div class="loading">Немає активних сигналів</div>';
+        }
+
+    } catch(e) {
+        console.error('Помилка завантаження статусу сигналів:', e);
+    }
+}
+
+async function parseAndAddSignal() {
+    const text = document.getElementById('signalText').value;
+    if (!text.trim()) {
+        alert('Введіть текст сигналу');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/signals/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text, trade_size_usdt: 20 })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            alert(`✅ Сигнал додано! ID: ${result.signal_id}`);
+            document.getElementById('signalText').value = '';
+            refreshSignalsData();
+        } else {
+            alert(`❌ Помилка: ${result.error}`);
+        }
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка: ' + e.message);
+    }
+}
+
+async function addManualSignal() {
+    const symbol = document.getElementById('manualSymbol').value.trim().toUpperCase();
+    const signalType = document.getElementById('manualType').value;
+    const entry = parseFloat(document.getElementById('manualEntry').value);
+    const sl = parseFloat(document.getElementById('manualSL').value);
+    const tpsText = document.getElementById('manualTPs').value;
+    const size = parseFloat(document.getElementById('manualSize').value);
+
+    if (!symbol || !entry || !sl || !tpsText) {
+        alert('Заповніть всі поля');
+        return;
+    }
+
+    const takeProfits = tpsText.split(',').map(tp => parseFloat(tp.trim())).filter(tp => !isNaN(tp));
+
+    if (takeProfits.length === 0) {
+        alert('Введіть хоча б один TP');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/signals/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: symbol + 'USDT',
+                signal_type: signalType,
+                entry_price: entry,
+                stop_loss: sl,
+                take_profits: takeProfits,
+                trade_size_usdt: size
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            alert(`✅ Сигнал додано!`);
+            document.getElementById('manualSymbol').value = '';
+            document.getElementById('manualEntry').value = '';
+            document.getElementById('manualSL').value = '';
+            document.getElementById('manualTPs').value = '';
+            refreshSignalsData();
+        } else {
+            alert(`❌ Помилка: ${result.error}`);
+        }
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка: ' + e.message);
+    }
+}
+
+async function closeSignal(signalId) {
+    if (!confirm('Закрити позицію?')) return;
+
+    try {
+        const response = await fetch(`/api/signals/close/${signalId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            alert('✅ Позицію закрито');
+            refreshSignalsData();
+        } else {
+            alert(`❌ Помилка: ${result.error}`);
+        }
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка: ' + e.message);
+    }
+}
+
+async function loadSignalsHistory() {
+    const limit = document.getElementById('signalsHistoryLimit').value || 50;
+
+    try {
+        const response = await fetch(`/api/signals/history?limit=${limit}`);
+        const signals = await response.json();
+
+        const table = document.getElementById('signalsHistoryTable');
+        if (!signals || signals.length === 0) {
+            table.innerHTML = '<div class="loading">Немає історії сигналів</div>';
+            return;
+        }
+
+        let html = `<table><thead><tr>
+            <th>Час</th><th>Пара</th><th>Тип</th><th>Entry</th><th>SL</th><th>TP</th><th>Статус</th><th>PnL</th>
+        </tr></thead><tbody>`;
+
+        for (const s of signals) {
+            const pnl = parseFloat(s.total_pnl || s.pnl || 0);
+            const statusText = s.status === 'closed' ? '✅ Закрито' : (s.status === 'active' ? '🟢 Активний' : '⏳ Очікує');
+
+            html += `<tr>
+                <td>${new Date(s.created_at).toLocaleString()}</td>
+                <td><strong>${s.symbol}</strong></td>
+                <td class="${s.signal_type === 'LONG' ? 'buy' : 'sell'}">${s.signal_type === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</td>
+                <td>$${parseFloat(s.entry_price).toFixed(8)}</td>
+                <td>$${parseFloat(s.stop_loss).toFixed(8)}</td>
+                <td>${s.take_profits ? s.take_profits.split(',').slice(0,3).map(tp => `$${parseFloat(tp).toFixed(8)}`).join('<br>') : '-'}</td>
+                <td>${statusText}</td>
+                <td class="${pnl >= 0 ? 'buy' : 'sell'}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</td>
+            </tr>`;
+        }
+
+        html += `</tbody></table>`;
+        table.innerHTML = html;
+
+    } catch(e) {
+        console.error('Помилка завантаження історії:', e);
+        document.getElementById('signalsHistoryTable').innerHTML = '<div class="loading">❌ Помилка завантаження</div>';
+    }
+}
+
+async function refreshSignalsData() {
+    await loadSignalsStatus();
+    await loadSignalsHistory();
+}
+
 
 // Показати графік для обраної криптовалюти
 window.showPriceChart = function(symbol) {

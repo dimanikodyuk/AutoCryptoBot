@@ -163,6 +163,31 @@ def init_db():
             print("Додаємо колонку symbol до таблиці balances...")
             cursor.execute("ALTER TABLE balances ADD COLUMN symbol TEXT")
 
+        # Таблиця сигналів
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS signals (
+                id TEXT PRIMARY KEY,
+                strategy_id INTEGER,
+                symbol TEXT,
+                signal_type TEXT,
+                entry_price REAL,
+                entry_limit REAL,
+                stop_loss REAL,
+                take_profits TEXT,
+                trade_size_usdt REAL,
+                status TEXT,
+                created_at TIMESTAMP,
+                closed_at TIMESTAMP,
+                total_pnl REAL DEFAULT 0,
+                FOREIGN KEY (strategy_id) REFERENCES strategies(id)
+            )
+        ''')
+
+        # Індекси для signals
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at)')
+
         # Таблиця моніторингу
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS system_monitor (
@@ -180,7 +205,7 @@ def init_db():
         # Додавання стратегій за замовчуванням
         cursor.execute("SELECT COUNT(*) FROM strategies")
         if cursor.fetchone()[0] == 0:
-            strategies = ['grid', 'news', 'scalp']
+            strategies = ['grid', 'news', 'scalp', 'signals']
             for s in strategies:
                 cursor.execute(
                     "INSERT INTO strategies (name, enabled, mode) VALUES (?, ?, ?)",

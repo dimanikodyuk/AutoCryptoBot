@@ -7,7 +7,7 @@ from trading.exchange import BybitExchange
 from trading.strategies.grid import GridStrategy
 from trading.strategies.news import NewsStrategy
 from trading.strategies.scalp import ScalpStrategy
-
+from trading.strategies.signals import SignalStrategy
 from utils.logger_utils import setup_logger
 
 logger = setup_logger('engine')
@@ -83,6 +83,20 @@ class TradingEngine:
                     strategy.enabled = bool(s['enabled'])
                     self.strategies[s['id']] = strategy
                     logger.info(f"Завантажено Scalp стратегію (id={s['id']}, enabled={strategy.enabled})")
+
+                elif s['name'] == 'signals':
+                    strategy = SignalStrategy(
+                        strategy_id=s['id'],
+                        name=s['name'],
+                        mode=self.config.DEFAULT_MODE,
+                        exchange=self.exchange
+                    )
+                    strategy.max_daily_drawdown = self.config.MAX_DAILY_DRAWDOWN
+                    strategy.max_daily_trades = self.config.MAX_DAILY_TRADES
+                    strategy.min_balance_for_trading = self.config.MIN_BALANCE_FOR_TRADING
+                    strategy.enabled = bool(s['enabled'])
+                    self.strategies[s['id']] = strategy
+                    logger.info(f"Завантажено Signals стратегію (id={s['id']}, enabled={strategy.enabled})")
 
         # Запуск WebSocket
         await self.exchange.start_websocket(self.config.SYMBOLS)
