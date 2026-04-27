@@ -2,11 +2,18 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from utils.logger_utils import setup_logger
+from datetime import datetime, timezone, timedelta
 
 DB_PATH = Path(__file__).parent.parent / "trading_bot.db"
 
 logger = setup_logger('database')
 
+# Отримуємо локальний час (Київ UTC+3)
+KYIV_TZ = timezone(timedelta(hours=3))
+
+def get_local_now():
+    """Повертає поточний час у часовій зоні Києва"""
+    return datetime.now(KYIV_TZ).replace(tzinfo=None)
 
 @contextmanager
 def get_db():
@@ -207,12 +214,12 @@ def init_db():
 
 
 def add_log(level: str, module: str, message: str):
-    """Додати лог в БД"""
+    """Додати лог в БД з локальним часом"""
     try:
         with get_db() as conn:
             conn.execute(
-                "INSERT INTO logs (level, module, message) VALUES (?, ?, ?)",
-                (level, module, message)
+                "INSERT INTO logs (timestamp, level, module, message) VALUES (?, ?, ?, ?)",
+                (get_local_now().isoformat(), level, module, message)
             )
     except Exception as e:
         print(f"Помилка логування: {e}")
