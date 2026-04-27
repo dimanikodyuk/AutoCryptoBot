@@ -396,124 +396,124 @@ def create_flask_app(config, trading_engine):
 
         # ============= МЕТРИКИ ТА ГРАФІКИ API =============
 
-        @app.route('/api/pnl_history')
-        @async_route
-        async def api_pnl_history():
-            """Отримання історії PnL для графіка"""
-            strategy = request.args.get('strategy', 'all')
-            days = int(request.args.get('days', 7))
+    @app.route('/api/pnl_history')
+    @async_route
+    async def api_pnl_history():
+        """Отримання історії PnL для графіка"""
+        strategy = request.args.get('strategy', 'all')
+        days = int(request.args.get('days', 7))
 
-            from datetime import datetime, timedelta
-            start_date = datetime.now() - timedelta(days=days)
+        from datetime import datetime, timedelta
+        start_date = datetime.now() - timedelta(days=days)
 
-            with get_db() as conn:
-                if strategy == 'all':
-                    cursor = conn.execute("""
-                        SELECT date(closed_at) as date, SUM(pnl) as daily_pnl
-                        FROM orders 
-                        WHERE status = 'closed' AND closed_at >= ?
-                        GROUP BY date(closed_at)
-                        ORDER BY date
-                    """, (start_date.isoformat(),))
-                else:
-                    cursor = conn.execute("""
-                        SELECT date(closed_at) as date, SUM(pnl) as daily_pnl
-                        FROM orders o
-                        JOIN strategies s ON o.strategy_id = s.id
-                        WHERE o.status = 'closed' AND s.name = ? AND o.closed_at >= ?
-                        GROUP BY date(closed_at)
-                        ORDER BY date
-                    """, (strategy, start_date.isoformat()))
-
-                rows = cursor.fetchall()
-                history = []
-                for row in rows:
-                    history.append({
-                        'date': row['date'],
-                        'pnl': row['daily_pnl'] or 0
-                    })
-
-                return jsonify({'history': history})
-
-        @app.route('/api/trades_distribution')
-        @async_route
-        async def api_trades_distribution():
-            """Розподіл угод по стратегіях"""
-            with get_db() as conn:
+        with get_db() as conn:
+            if strategy == 'all':
                 cursor = conn.execute("""
-                    SELECT s.name as strategy, COUNT(*) as count
-                    FROM orders o
-                    JOIN strategies s ON o.strategy_id = s.id
-                    WHERE o.status = 'closed'
-                    GROUP BY s.name
-                """)
-                rows = cursor.fetchall()
-                return jsonify([dict(row) for row in rows])
-
-        @app.route('/api/win_rate_stats')
-        @async_route
-        async def api_win_rate_stats():
-            """Статистика Win Rate по стратегіях"""
-            with get_db() as conn:
-                cursor = conn.execute("""
-                    SELECT 
-                        s.name as strategy,
-                        COUNT(CASE WHEN o.pnl > 0 THEN 1 END) as wins,
-                        COUNT(CASE WHEN o.pnl <= 0 THEN 1 END) as losses,
-                        COUNT(*) as total
-                    FROM orders o
-                    JOIN strategies s ON o.strategy_id = s.id
-                    WHERE o.status = 'closed'
-                    GROUP BY s.name
-                """)
-                rows = cursor.fetchall()
-                result = []
-                for row in rows:
-                    win_rate = (row['wins'] / row['total'] * 100) if row['total'] > 0 else 0
-                    result.append({
-                        'strategy': row['strategy'],
-                        'wins': row['wins'],
-                        'losses': row['losses'],
-                        'total': row['total'],
-                        'win_rate': round(win_rate, 2)
-                    })
-                return jsonify(result)
-
-        @app.route('/api/balance_history')
-        @async_route
-        async def api_balance_history():
-            """Історія балансу"""
-            days = int(request.args.get('days', 30))
-
-            from datetime import datetime, timedelta
-            start_date = datetime.now() - timedelta(days=days)
-
-            with get_db() as conn:
-                # Отримуємо денні зміни балансу з ордерів
-                cursor = conn.execute("""
-                    SELECT 
-                        date(closed_at) as date,
-                        SUM(pnl) as daily_pnl
+                    SELECT date(closed_at) as date, SUM(pnl) as daily_pnl
                     FROM orders 
                     WHERE status = 'closed' AND closed_at >= ?
                     GROUP BY date(closed_at)
                     ORDER BY date
                 """, (start_date.isoformat(),))
+            else:
+                cursor = conn.execute("""
+                    SELECT date(closed_at) as date, SUM(pnl) as daily_pnl
+                    FROM orders o
+                    JOIN strategies s ON o.strategy_id = s.id
+                    WHERE o.status = 'closed' AND s.name = ? AND o.closed_at >= ?
+                    GROUP BY date(closed_at)
+                    ORDER BY date
+                """, (strategy, start_date.isoformat()))
 
-                rows = cursor.fetchall()
+            rows = cursor.fetchall()
+            history = []
+            for row in rows:
+                history.append({
+                    'date': row['date'],
+                    'pnl': row['daily_pnl'] or 0
+                })
 
-                # Розраховуємо кумулятивний баланс
-                balance = 100.0  # Початковий баланс
-                history = []
-                for row in rows:
-                    balance += row['daily_pnl'] or 0
-                    history.append({
-                        'date': row['date'],
-                        'balance': round(balance, 2),
-                        'daily_pnl': round(row['daily_pnl'] or 0, 2)
-                    })
+            return jsonify({'history': history})
 
-                return jsonify({'history': history})
+    @app.route('/api/trades_distribution')
+    @async_route
+    async def api_trades_distribution():
+        """Розподіл угод по стратегіях"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT s.name as strategy, COUNT(*) as count
+                FROM orders o
+                JOIN strategies s ON o.strategy_id = s.id
+                WHERE o.status = 'closed'
+                GROUP BY s.name
+            """)
+            rows = cursor.fetchall()
+            return jsonify([dict(row) for row in rows])
+
+    @app.route('/api/win_rate_stats')
+    @async_route
+    async def api_win_rate_stats():
+        """Статистика Win Rate по стратегіях"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT 
+                    s.name as strategy,
+                    COUNT(CASE WHEN o.pnl > 0 THEN 1 END) as wins,
+                    COUNT(CASE WHEN o.pnl <= 0 THEN 1 END) as losses,
+                    COUNT(*) as total
+                FROM orders o
+                JOIN strategies s ON o.strategy_id = s.id
+                WHERE o.status = 'closed'
+                GROUP BY s.name
+            """)
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                win_rate = (row['wins'] / row['total'] * 100) if row['total'] > 0 else 0
+                result.append({
+                    'strategy': row['strategy'],
+                    'wins': row['wins'],
+                    'losses': row['losses'],
+                    'total': row['total'],
+                    'win_rate': round(win_rate, 2)
+                })
+            return jsonify(result)
+
+    @app.route('/api/balance_history')
+    @async_route
+    async def api_balance_history():
+        """Історія балансу"""
+        days = int(request.args.get('days', 30))
+
+        from datetime import datetime, timedelta
+        start_date = datetime.now() - timedelta(days=days)
+
+        with get_db() as conn:
+            # Отримуємо денні зміни балансу з ордерів
+            cursor = conn.execute("""
+                SELECT 
+                    date(closed_at) as date,
+                    SUM(pnl) as daily_pnl
+                FROM orders 
+                WHERE status = 'closed' AND closed_at >= ?
+                GROUP BY date(closed_at)
+                ORDER BY date
+            """, (start_date.isoformat(),))
+
+            rows = cursor.fetchall()
+
+            # Розраховуємо кумулятивний баланс
+            balance = 100.0  # Початковий баланс
+            history = []
+            for row in rows:
+                balance += row['daily_pnl'] or 0
+                history.append({
+                    'date': row['date'],
+                    'balance': round(balance, 2),
+                    'daily_pnl': round(row['daily_pnl'] or 0, 2)
+                })
+
+            return jsonify({'history': history})
 
     # ============= НОВЕ: ЛОГИ API (БД) =============
 
