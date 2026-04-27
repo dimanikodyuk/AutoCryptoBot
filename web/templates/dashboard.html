@@ -353,53 +353,55 @@
         <!-- Метрики -->
         <div id="tab-metrics" class="tab-content">
             <div class="settings-panel">
-                <h3>📊 Prometheus метрики</h3>
-                <div class="settings-row">
-                    <button onclick="loadMetrics()" class="btn-refresh">🔄 Оновити метрики</button>
+                <h3>📊 Системні метрики</h3>
+                <div class="stats-grid" id="metricsSystem">
+                    <div class="stat-card"><div class="stat-value" id="metricsCpu">-</div><div class="stat-label">CPU %</div></div>
+                    <div class="stat-card"><div class="stat-value" id="metricsRam">-</div><div class="stat-label">RAM %</div></div>
+                    <div class="stat-card"><div class="stat-value" id="metricsUptime">-</div><div class="stat-label">Uptime</div></div>
+                    <div class="stat-card"><div class="stat-value" id="metricsTotalPnl">-</div><div class="stat-label">Загальний PnL</div></div>
+                    <div class="stat-card"><div class="stat-value" id="metricsTotalTrades">-</div><div class="stat-label">Всього угод</div></div>
+                    <div class="stat-card"><div class="stat-value" id="metricsWinRate">-</div><div class="stat-label">Win Rate</div></div>
+                </div>
+            </div>
+
+            <div class="chart-card">
+                <h3>📈 Динаміка PnL за часом</h3>
+                <div class="filter-bar">
+                    <select id="metricsPnlStrategy" onchange="loadMetricsCharts()">
+                        <option value="all">Всі стратегії</option>
+                        <option value="grid">Grid</option>
+                        <option value="scalp">Scalp</option>
+                        <option value="news">News</option>
+                    </select>
+                    <select id="metricsPnlDays" onchange="loadMetricsCharts()">
+                        <option value="1">Останній день</option>
+                        <option value="7" selected>Останній тиждень</option>
+                        <option value="30">Останній місяць</option>
+                        <option value="90">Останні 3 місяці</option>
+                    </select>
+                    <button class="btn-refresh" onclick="loadMetricsCharts()">🔄 Оновити</button>
                     <button onclick="window.open('/metrics', '_blank')" style="background: #9b59b6;">📥 Скачати метрики (Prometheus)</button>
                 </div>
+                <div id="pnlHistoryChart" style="height: 400px;"></div>
             </div>
-            <div class="stats-grid" id="metricsSystem">
-                <div class="stat-card"><div class="stat-value" id="metricsCpu">-</div><div class="stat-label">CPU %</div></div>
-                <div class="stat-card"><div class="stat-value" id="metricsRam">-</div><div class="stat-label">RAM %</div></div>
-                <div class="stat-card"><div class="stat-value" id="metricsUptime">-</div><div class="stat-label">Uptime</div></div>
-            </div>
-            <div id="metricsContainer"><div class="loading">Завантаження метрик...</div></div>
-        </div>
 
-        <!-- Керування -->
-        <div id="tab-controls" class="tab-content">
-            <div class="stats-grid" id="systemStats">
-                <div class="stat-card"><div class="stat-value" id="cpuUsage">-</div><div class="stat-label">CPU</div></div>
-                <div class="stat-card"><div class="stat-value" id="ramUsage">-</div><div class="stat-label">RAM</div></div>
-                <div class="stat-card"><div class="stat-value" id="diskUsage">-</div><div class="stat-label">Диск</div></div>
-                <div class="stat-card"><div class="stat-value" id="botUptime">-</div><div class="stat-label">Uptime</div></div>
+            <div class="chart-card">
+                <h3>📊 Розподіл угод по стратегіях</h3>
+                <div id="tradesDistributionChart" style="height: 350px;"></div>
             </div>
-            <div class="stats-grid" id="electricityStats">
-                <div class="stat-card"><div class="stat-value" id="powerCost">-</div><div class="stat-label">Витрачено (грн)</div></div>
-                <div class="stat-card"><div class="stat-value" id="powerEnergy">-</div><div class="stat-label">Спожито (кВт⋅год)</div></div>
-                <div class="stat-card"><div class="stat-value" id="powerMonthly">-</div><div class="stat-label">За місяць (грн)</div></div>
-                <div class="stat-card"><div class="stat-value" id="powerYearly">-</div><div class="stat-label">За рік (грн)</div></div>
-                <div class="stat-card"><div class="stat-value" id="currentPower">-</div><div class="stat-label">Поточна потужність (W)</div></div>
-                <div class="stat-card"><div class="stat-value" id="cpuLoad">-</div><div class="stat-label">CPU</div></div>
+
+            <div class="chart-card">
+                <h3>🏆 Win Rate по стратегіях</h3>
+                <div id="winRateChart" style="height: 350px;"></div>
             </div>
-            <div class="settings-panel">
-                <h3>🎮 Режим роботи</h3>
-                <div class="settings-row">
-                    <label>Поточний режим:</label>
-                    <strong id="currentMode" style="padding: 4px 12px; border-radius: 20px;">-</strong>
-                    <button id="modeSimulation" class="btn-mode" onclick="changeMode('simulation')" style="background:#28a745;">🟢 Симуляція</button>
-                    <button id="modeMonitor" class="btn-mode" onclick="changeMode('monitor')" style="background:#ff8800;">🟡 Моніторинг</button>
-                    <button id="modeReal" class="btn-mode" onclick="changeMode('real')" style="background:#dc3545;">🔴 РЕАЛЬНА</button>
-                </div>
-                <div id="balanceInfo" style="margin-top: 10px; font-size: 12px; color: #888;"></div>
+
+            <div class="chart-card">
+                <h3>💰 Динаміка балансу</h3>
+                <div id="balanceHistoryChart" style="height: 400px;"></div>
             </div>
-            <div class="settings-panel">
-                <h3>🔧 Дії</h3>
-                <div class="settings-row">
-                    <button class="btn-danger" onclick="emergencyStop()">🛑 ЕКСТРЕНА ЗУПИНКА</button>
-                    <button onclick="restartBot()" style="background: #ff8800;">🔄 Перезапустити бота</button>
-                </div>
+
+            <div id="metricsContainer" style="margin-top: 20px;">
+                <div class="loading">Детальні метрики...</div>
             </div>
         </div>
 
@@ -1740,6 +1742,187 @@
             document.getElementById('optimizationTable').innerHTML = html;
         }
         setDefaultBacktestDates();
+        // ============= МЕТРИКИ ТА ГРАФІКИ =============
+
+        async function loadMetricsCharts() {
+            await loadPnlHistoryChart();
+            await loadTradesDistribution();
+            await loadWinRateChart();
+            await loadBalanceHistory();
+            await loadMetrics();
+        }
+
+        async function loadPnlHistoryChart() {
+            const strategy = document.getElementById('metricsPnlStrategy').value;
+            const days = parseInt(document.getElementById('metricsPnlDays').value);
+
+            try {
+                const response = await fetch(`/api/pnl_history?strategy=${strategy}&days=${days}`);
+                const data = await response.json();
+
+                if (!data.history || data.history.length === 0) {
+                    document.getElementById('pnlHistoryChart').innerHTML = '<div class="loading">Немає даних PnL</div>';
+                    return;
+                }
+
+                const timestamps = data.history.map(h => h.date);
+                const pnlValues = data.history.map(h => h.pnl);
+                const cumulativePnl = [];
+                let cumulative = 0;
+                for (const pnl of pnlValues) {
+                    cumulative += pnl;
+                    cumulativePnl.push(cumulative);
+                }
+
+                const traces = [
+                    {
+                        x: timestamps,
+                        y: pnlValues,
+                        type: 'bar',
+                        name: 'Денний PnL',
+                        marker: { color: '#00d4ff', opacity: 0.7 },
+                        yaxis: 'y'
+                    },
+                    {
+                        x: timestamps,
+                        y: cumulativePnl,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: 'Кумулятивний PnL',
+                        line: { color: '#00ff88', width: 2 },
+                        marker: { size: 4, color: '#00ff88' },
+                        yaxis: 'y2'
+                    }
+                ];
+
+                const layout = {
+                    title: `Динаміка PnL (${days} днів)`,
+                    paper_bgcolor: '#1a1a2e',
+                    plot_bgcolor: '#1a1a2e',
+                    font: { color: '#e0e0e0' },
+                    xaxis: { title: 'Дата', gridcolor: '#2a2a4a', tickangle: -45 },
+                    yaxis: { title: 'Денний PnL (USDT)', gridcolor: '#2a2a4a', side: 'left' },
+                    yaxis2: { title: 'Кумулятивний PnL (USDT)', gridcolor: '#2a2a4a', overlaying: 'y', side: 'right' },
+                    hovermode: 'x unified',
+                    legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(0,0,0,0.6)' }
+                };
+
+                Plotly.newPlot('pnlHistoryChart', traces, layout, { responsive: true });
+
+            } catch(e) {
+                console.error('Помилка завантаження графіка PnL:', e);
+                document.getElementById('pnlHistoryChart').innerHTML = '<div class="loading">Помилка завантаження</div>';
+            }
+        }
+
+        async function loadTradesDistribution() {
+            try {
+                const response = await fetch('/api/trades_distribution');
+                const data = await response.json();
+
+                const traces = [{
+                    values: data.map(d => d.count),
+                    labels: data.map(d => `${d.strategy.toUpperCase()} (${d.count})`),
+                    type: 'pie',
+                    marker: { colors: ['#00d4ff', '#00ff88', '#ff8800', '#ff4444'] },
+                    textinfo: 'label+percent',
+                    textposition: 'outside',
+                    hole: 0.3
+                }];
+
+                const layout = {
+                    title: 'Розподіл угод по стратегіях',
+                    paper_bgcolor: '#1a1a2e',
+                    plot_bgcolor: '#1a1a2e',
+                    font: { color: '#e0e0e0' },
+                    showlegend: true,
+                    legend: { x: 0.8, y: 0.5 }
+                };
+
+                Plotly.newPlot('tradesDistributionChart', traces, layout, { responsive: true });
+
+            } catch(e) {
+                console.error('Помилка завантаження розподілу:', e);
+            }
+        }
+
+        async function loadWinRateChart() {
+            try {
+                const response = await fetch('/api/win_rate_stats');
+                const data = await response.json();
+
+                const strategies = data.map(d => d.strategy.toUpperCase());
+                const winRates = data.map(d => d.win_rate);
+                const colors = winRates.map(w => w >= 50 ? '#00ff88' : '#ff4444');
+
+                const traces = [{
+                    x: strategies,
+                    y: winRates,
+                    type: 'bar',
+                    marker: { color: colors },
+                    text: winRates.map(w => `${w.toFixed(1)}%`),
+                    textposition: 'auto',
+                    textfont: { color: '#e0e0e0' }
+                }];
+
+                const layout = {
+                    title: 'Win Rate по стратегіях',
+                    paper_bgcolor: '#1a1a2e',
+                    plot_bgcolor: '#1a1a2e',
+                    font: { color: '#e0e0e0' },
+                    xaxis: { title: 'Стратегія', gridcolor: '#2a2a4a' },
+                    yaxis: { title: 'Win Rate (%)', gridcolor: '#2a2a4a', range: [0, 100] },
+                    yaxis2: { visible: false }
+                };
+
+                Plotly.newPlot('winRateChart', traces, layout, { responsive: true });
+
+            } catch(e) {
+                console.error('Помилка завантаження Win Rate:', e);
+            }
+        }
+
+        async function loadBalanceHistory() {
+            try {
+                const response = await fetch('/api/balance_history');
+                const data = await response.json();
+
+                if (!data.history || data.history.length === 0) {
+                    document.getElementById('balanceHistoryChart').innerHTML = '<div class="loading">Немає даних балансу</div>';
+                    return;
+                }
+
+                const timestamps = data.history.map(h => h.date);
+                const balances = data.history.map(h => h.balance);
+
+                const traces = [{
+                    x: timestamps,
+                    y: balances,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: 'Загальний баланс',
+                    line: { color: '#00d4ff', width: 2 },
+                    marker: { size: 4, color: '#00d4ff' },
+                    fill: 'tozeroy',
+                    fillcolor: 'rgba(0, 212, 255, 0.1)'
+                }];
+
+                const layout = {
+                    title: 'Динаміка балансу',
+                    paper_bgcolor: '#1a1a2e',
+                    plot_bgcolor: '#1a1a2e',
+                    font: { color: '#e0e0e0' },
+                    xaxis: { title: 'Дата', gridcolor: '#2a2a4a', tickangle: -45 },
+                    yaxis: { title: 'Баланс (USDT)', gridcolor: '#2a2a4a', tickprefix: '$' },
+                    hovermode: 'x'
+                };
+
+                Plotly.newPlot('balanceHistoryChart', traces, layout, { responsive: true });
+
+            } catch(e) {
+                console.error('Помилка завантаження балансу:', e);
+            }
+        }
 
         // ============= МЕТРИКИ =============
         async function loadMetrics() {
