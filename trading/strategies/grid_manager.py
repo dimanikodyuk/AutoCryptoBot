@@ -69,6 +69,34 @@ class GridInstance:
             f"[{self.symbol}] available_balance: balance={self.balance}, locked={self.locked_balance}, result={result}")
         return result
 
+    async def _save_chart_data(self, order_id: str, price: float, timestamp: datetime):
+        """Збереження свічок для ордера"""
+        try:
+            from database.db import save_price_history
+            from datetime import datetime, timezone
+
+            # Визначаємо діапазон свічок: 30 хв до і 30 хв після
+            ts = int(timestamp.timestamp() * 1000)
+            start_ts = ts - 30 * 60 * 1000
+            end_ts = ts + 30 * 60 * 1000
+
+            # Отримуємо свічки
+            klines = await self.exchange.get_klines(self.symbol, '1', limit=200)
+            klines.sort(key=lambda k: k['timestamp'])
+
+            filtered_klines = [k for k in klines if start_ts <= k['timestamp'] <= end_ts]
+
+            # Додаємо time_iso
+            for k in filtered_klines:
+                k['time_iso'] = datetime.utcfromtimestamp(k['timestamp'] / 1000).strftime('%Y-%m-%dT%H:%M:%S')
+
+            if filtered_klines:
+                save_price_history(order_id, self.symbol, filtered_klines)
+                logger.info(f"[{self.symbol}] Збережено {len(filtered_klines)} свічок для ордера {order_id}")
+
+        except Exception as e:
+            logger.error(f"Помилка збереження свічок: {e}")
+
     def _load_history(self):
         with get_db() as conn:
             orders = conn.execute(
@@ -231,6 +259,7 @@ class GridInstance:
             self._save_order(order_id, pair_id, 'buy', buy_price, quantity, 'open')
             orders_created += 1
             logger.info(f"[{self.symbol}] ✅ Створено BUY L{idx} @ ${buy_price:.2f}")
+            await self._save_chart_data(order_id, buy_price, datetime.now())
 
         self.is_initialized = True
         self.last_rebalance_price = current_price
@@ -360,7 +389,7 @@ class GridInstance:
 
         add_log("INFO", "grid",
                 f"[{self.symbol}] BUY виконано @ {buy_order['price']:.2f}, створено SELL @ {sell_price:.2f} (pair_id={pair_id[:8]}...)")
-
+        await self._save_chart_data(sell_order_id, sell_price, datetime.now())
         if self.parent_strategy and hasattr(self.parent_strategy, 'send_notification'):
             await self.parent_strategy.send_notification('grid', self.symbol, 'buy', buy_order['price'],
                                                          buy_order['quantity'])
