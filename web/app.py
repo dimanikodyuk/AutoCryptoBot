@@ -1061,41 +1061,83 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/news_status')
     @async_route
     async def api_news_status():
-        for strategy in trading_engine.strategies.values():
-            if strategy.name == 'news':
-                status = await strategy.get_status()
-                articles = []
-                if hasattr(strategy, 'last_news') and strategy.last_news:
-                    for article in strategy.last_news[:20]:
-                        # ... аналіз сентименту ...
-                        articles.append({...})
+        """Отримання статусу новинної стратегії"""
+        try:
+            for strategy in trading_engine.strategies.values():
+                if strategy.name == 'news':
+                    status = await strategy.get_status()
+                    articles = []
 
-                # ОТРИМУЄМО ІСТОРІЮ З БД
-                from database.db import get_sentiment_history
-                sentiment_history = get_sentiment_history(limit=50)
-                # Перевертаємо для хронологічного порядку
-                sentiment_history.reverse()
+                    # Отримуємо останні новини зі стратегії
+                    if hasattr(strategy, 'last_news') and strategy.last_news:
+                        for article in strategy.last_news[:20]:
+                            title = article.get('title', '').lower()
+                            description = article.get('description', '').lower()
+                            text = title + ' ' + (description or '')
 
-                return jsonify({
-                    'sentiment': {
-                        'overall': status.get('current_sentiment', 'neutral'),
-                        'positive': sum(1 for a in articles if a['sentiment'] == 'positive'),
-                        'neutral': sum(1 for a in articles if a['sentiment'] == 'neutral'),
-                        'negative': sum(1 for a in articles if a['sentiment'] == 'negative')
-                    },
-                    'articles_count': status.get('last_news_count', 0),
-                    'last_update': status.get('last_update'),
-                    'articles': articles,
-                    'api_key_configured': status.get('api_key_configured', False),
-                    'sentiment_history': sentiment_history  # ДОДАЛИ
-                })
+                            positive_keywords = ['surge', 'rally', 'gain', 'positive', 'bullish', 'record', 'high',
+                                                 'upgrade', 'approve', 'adoption', 'breakthrough', 'soar', 'pump',
+                                                 'moon',
+                                                 'green']
+                            negative_keywords = ['drop', 'crash', 'fall', 'negative', 'bearish', 'low', 'decline',
+                                                 'hack',
+                                                 'ban', 'scandal', 'fraud', 'crackdown', 'dump', 'red', 'sell', 'panic',
+                                                 'fud']
+
+                            pos_score = sum(1 for kw in positive_keywords if kw in text)
+                            neg_score = sum(1 for kw in negative_keywords if kw in text)
+
+                            if pos_score > neg_score:
+                                sentiment = 'positive'
+                            elif neg_score > pos_score:
+                                sentiment = 'negative'
+                            else:
+                                sentiment = 'neutral'
+
+                            articles.append({
+                                'title': article.get('title', ''),
+                                'description': article.get('description', ''),
+                                'url': article.get('url', ''),
+                                'source': article.get('source', {}).get('name', 'Unknown'),
+                                'publishedAt': article.get('publishedAt', ''),
+                                'sentiment': sentiment
+                            })
+
+                    # Отримуємо історію сентименту з БД
+                    sentiment_history = []
+                    try:
+                        from database.db import get_sentiment_history
+                        sentiment_history = get_sentiment_history(limit=50)
+                        sentiment_history.reverse()  # для хронологічного порядку
+                    except Exception as e:
+                        logger.warning(f"Не вдалося отримати історію сентименту: {e}")
+
+                    return jsonify({
+                        'sentiment': {
+                            'overall': status.get('current_sentiment', 'neutral'),
+                            'positive': sum(1 for a in articles if a['sentiment'] == 'positive'),
+                            'neutral': sum(1 for a in articles if a['sentiment'] == 'neutral'),
+                            'negative': sum(1 for a in articles if a['sentiment'] == 'negative')
+                        },
+                        'articles_count': status.get('last_news_count', 0),
+                        'last_update': status.get('last_update'),
+                        'articles': articles,
+                        'api_key_configured': status.get('api_key_configured', False),
+                        'sentiment_history': sentiment_history
+                    })
+        except Exception as e:
+            logger.error(f"Помилка в api_news_status: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e), 'api_key_configured': False, 'sentiment_history': []}), 500
+
         return jsonify({
             'sentiment': {'overall': 'neutral', 'positive': 0, 'neutral': 0, 'negative': 0},
             'articles_count': 0,
             'last_update': None,
             'articles': [],
             'api_key_configured': False,
-            'sentiment_history': []  # ДОДАЛИ
+            'sentiment_history': []
         })
 
     @app.route('/api/news_settings', methods=['POST'])
