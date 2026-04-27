@@ -100,10 +100,47 @@ class GridStrategy(BaseStrategy):
 
     async def update_settings(self, symbols_list=None, grid_levels=None, order_size_usdt=None,
                               lower_percent=None, upper_percent=None):
-        if symbols_list:
+        # Обробка зміни списку символів
+        if symbols_list is not None:
+            old_symbols = set(self.symbols)
+            new_symbols = set(symbols_list)
+
+            # Видаляємо сітки для символів, яких більше немає
+            removed_symbols = old_symbols - new_symbols
+            for sym in removed_symbols:
+                if sym in self.grids:
+                    logger.info(f"[Grid] Видаляємо сітку для {sym}")
+                    grid = self.grids[sym]
+                    # Скасовуємо всі активні ордери
+                    for oid in list(grid.active_buy_orders.keys()):
+                        await grid.cancel_order(oid)
+                    for oid in list(grid.active_sell_orders.keys()):
+                        await grid.cancel_order(oid)
+                    # Видаляємо з БД всі відкриті ордери
+                    with get_db() as conn:
+                        conn.execute(
+                            "DELETE FROM orders WHERE strategy_id=? AND symbol=? AND status='open'",
+                            (self.strategy_id, sym)
+                        )
+                    # Видаляємо сітку з пам'яті
+                    del self.grids[sym]
+
+            # Додаємо нові сітки
+            added_symbols = new_symbols - old_symbols
+            for sym in added_symbols:
+                logger.info(f"[Grid] Додаємо сітку для {sym}")
+                self.grids[sym] = GridInstance(
+                    symbol=sym, strategy_id=self.strategy_id, exchange=self.exchange,
+                    grid_levels=self.default_grid_levels, order_size_usdt=self.default_order_size_usdt,
+                    lower_percent=self.default_lower_percent, upper_percent=self.default_upper_percent,
+                    parent_strategy=self
+                )
+
+            # Оновлюємо список символів
             self.symbols = symbols_list
-            self._init_grids()
-        for g in self.grids.values():
+
+        # Оновлюємо параметри для всіх існуючих сіток
+        for sym, g in self.grids.items():
             if grid_levels is not None:
                 g.grid_levels = grid_levels
             if order_size_usdt is not None:
@@ -118,6 +155,8 @@ class GridStrategy(BaseStrategy):
                 lower_percent=lower_percent,
                 upper_percent=upper_percent
             )
+
+        # Оновлюємо значення за замовчуванням
         if grid_levels is not None:
             self.default_grid_levels = grid_levels
         if order_size_usdt is not None:
@@ -126,12 +165,17 @@ class GridStrategy(BaseStrategy):
             self.default_lower_percent = lower_percent
         if upper_percent is not None:
             self.default_upper_percent = upper_percent
+
+        # Зберігаємо налаштування
         save_strategy_settings('grid',
                                symbols=self.symbols,
                                grid_levels=self.default_grid_levels,
                                order_size_usdt=self.default_order_size_usdt,
                                lower_percent=self.default_lower_percent,
                                upper_percent=self.default_upper_percent)
+
+        logger.info(f"[Grid] Налаштування оновлено: символи={self.symbols}, "
+                    f"рівні={self.default_grid_levels}, розмір=${self.default_order_size_usdt}")
         return True
 
     async def analyze(self):
@@ -224,40 +268,51 @@ class GridStrategy(BaseStrategy):
             await self.telegram_bot.send_notification(message, parse_mode='Markdown')
 
     async def reset(self):
-        for g in self.grids.values():
-            for oid in list(g.active_buy_orders.keys()):
-                await g.cancel_order(oid)
-            for oid in list(g.active_sell_orders.keys()):
-                await g.cancel_order(oid)
-            g.total_pnl = 0
-            g.total_trades = 0
-            g.winning_trades = 0
-            g.losing_trades = 0
-            g.locked_balance = 0
-            g.lower_price = None
-            g.upper_price = None
-            g.grid_spacing = None
-            g.is_initialized = False
-            g.price_history = []
-            g.active_buy_orders.clear()
-            g.active_sell_orders.clear()
-            g.closed_pairs = []
+        # Зупиняємо аналіз
+        self.enabled = False
+        if self._analysis_task:
+            self._analysis_task.cancel()
 
+        # Скасовуємо всі ордери для всіх сіток
+        for sym, grid in self.grids.items():
+            for oid in list(grid.active_buy_orders.keys()):
+                await grid.cancel_order(oid)
+            for oid in list(grid.active_sell_orders.keys()):
+                await grid.cancel_order(oid)
+            grid.total_pnl = 0
+            grid.total_trades = 0
+            grid.winning_trades = 0
+            grid.losing_trades = 0
+            grid.locked_balance = 0
+            grid.lower_price = None
+            grid.upper_price = None
+            grid.grid_spacing = None
+            grid.is_initialized = False
+            grid.price_history = []
+            grid.active_buy_orders.clear()
+            grid.active_sell_orders.clear()
+            grid.closed_pairs = []
+
+        # Скидаємо баланс
         self.total_balance = 100.0
         self.total_pnl = 0.0
         self.total_trades = 0
         self.winning_trades = 0
 
+        # Очищаємо БД
         with get_db() as conn:
             conn.execute("DELETE FROM orders WHERE strategy_id=?", (self.strategy_id,))
             conn.execute("DELETE FROM balances WHERE strategy_id=?", (self.strategy_id,))
+
+        # Перестворюємо сітки з новими символами
+        self._init_grids()
         self._save_balance()
 
         # Скидаємо ліміти
         await self.reset_limits()
 
         add_log("INFO", self.name, "Стратегію скинуто")
-        logger.info(f"GridStrategy: повне скидання виконано")
+        logger.info(f"GridStrategy: повне скидання виконано. Символи: {self.symbols}")
 
     async def emergency_stop(self):
         await self.stop()
