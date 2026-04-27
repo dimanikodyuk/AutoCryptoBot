@@ -5,7 +5,7 @@ SETTINGS_FILE = Path(__file__).parent / "settings.json"
 
 DEFAULT_SETTINGS = {
     "grid": {
-        "symbols": ["BTCUSDT", "SOLUSDT"],  # ← ДОДАНО КОМУ
+        "symbols": ["BTCUSDT", "SOLUSDT"],
         "grid_levels": 10,
         "order_size_usdt": 50,
         "lower_percent": 20,
@@ -26,8 +26,14 @@ DEFAULT_SETTINGS = {
         "trailing_stop_percent": 0.3,
         "timeframe": "1",
         "enabled": False
+    },
+    "dashboard": {
+        "display_symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"],
+        "refresh_interval": 1000,  # мс
+        "show_24h_change": True
     }
 }
+
 
 def load_settings():
     if SETTINGS_FILE.exists():
@@ -47,6 +53,7 @@ def load_settings():
             return DEFAULT_SETTINGS.copy()
     return DEFAULT_SETTINGS.copy()
 
+
 def save_settings(settings):
     try:
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -55,6 +62,7 @@ def save_settings(settings):
     except Exception as e:
         print(f"Помилка збереження налаштувань: {e}")
         return False
+
 
 def save_strategy_settings(strategy_name: str, **kwargs):
     settings = load_settings()
@@ -66,6 +74,7 @@ def save_strategy_settings(strategy_name: str, **kwargs):
 
     return save_settings(settings)
 
+
 def get_strategy_settings(strategy_name: str):
     settings = load_settings()
     result = settings.get(strategy_name, {})
@@ -74,3 +83,27 @@ def get_strategy_settings(strategy_name: str):
         if key not in result:
             result[key] = value
     return result
+
+
+# Нові функції для налаштувань дашборду
+def get_dashboard_settings():
+    """Отримання налаштувань дашборду"""
+    settings = load_settings()
+    return settings.get("dashboard", DEFAULT_SETTINGS["dashboard"])
+
+
+def save_dashboard_settings(display_symbols=None, refresh_interval=None, show_24h_change=None):
+    """Збереження налаштувань дашборду"""
+    settings = load_settings()
+
+    if "dashboard" not in settings:
+        settings["dashboard"] = DEFAULT_SETTINGS["dashboard"].copy()
+
+    if display_symbols is not None:
+        settings["dashboard"]["display_symbols"] = display_symbols
+    if refresh_interval is not None:
+        settings["dashboard"]["refresh_interval"] = refresh_interval
+    if show_24h_change is not None:
+        settings["dashboard"]["show_24h_change"] = show_24h_change
+
+    return save_settings(settings)

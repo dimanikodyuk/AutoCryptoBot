@@ -668,6 +668,79 @@ def create_flask_app(config, trading_engine):
                 return jsonify({'success': True})
         return jsonify({'error': 'Strategy not found'}), 404
 
+    # Додати в кінець файлу web/app.py, перед return app
+
+    @app.route('/api/dashboard/settings', methods=['GET'])
+    @async_route
+    async def api_dashboard_settings():
+        """Отримання налаштувань дашборду"""
+        from config_manager import get_dashboard_settings
+        settings = get_dashboard_settings()
+        return jsonify(settings)
+
+    @app.route('/api/dashboard/settings', methods=['POST'])
+    @async_route
+    async def api_update_dashboard_settings():
+        """Оновлення налаштувань дашборду"""
+        from config_manager import save_dashboard_settings
+
+        data = request.get_json()
+        display_symbols = data.get('display_symbols')
+        refresh_interval = data.get('refresh_interval')
+        show_24h_change = data.get('show_24h_change')
+
+        if display_symbols:
+            display_symbols = [s.strip().upper() for s in display_symbols if s.strip()]
+
+        success = save_dashboard_settings(
+            display_symbols=display_symbols,
+            refresh_interval=refresh_interval,
+            show_24h_change=show_24h_change
+        )
+
+        return jsonify({'success': success})
+
+    @app.route('/api/crypto/prices')
+    @async_route
+    async def api_crypto_prices():
+        """Отримання поточних цін та змін за 24 години"""
+        from config_manager import get_dashboard_settings
+
+        settings = get_dashboard_settings()
+        symbols = settings.get('display_symbols', ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
+
+        prices = {}
+        for symbol in symbols:
+            try:
+                # Отримуємо поточну ціну
+                current_price = await trading_engine.exchange.get_current_price(symbol)
+
+                # Отримуємо зміну за 24 години
+                change_24h = 0
+                klines = await trading_engine.exchange.get_klines(symbol, 'D', limit=2)
+                if len(klines) >= 2:
+                    yesterday_close = klines[-2]['close']
+                    if yesterday_close > 0:
+                        change_24h = ((current_price - yesterday_close) / yesterday_close) * 100
+
+                prices[symbol] = {
+                    'price': current_price,
+                    'change_24h': round(change_24h, 2),
+                    'symbol': symbol,
+                    'name': symbol.replace('USDT', '')
+                }
+            except Exception as e:
+                logger.error(f"Помилка отримання ціни {symbol}: {e}")
+                prices[symbol] = {
+                    'price': 0,
+                    'change_24h': 0,
+                    'symbol': symbol,
+                    'name': symbol.replace('USDT', ''),
+                    'error': str(e)
+                }
+
+        return jsonify(prices)
+
     # ============= База даних API =============
 
     @app.route('/api/db_tables_list')

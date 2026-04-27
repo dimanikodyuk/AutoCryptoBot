@@ -112,6 +112,127 @@
             cursor: pointer;
             transition: all 0.2s;
         }
+        /* Віджет цін - виправлений */
+.prices-widget {
+    background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1a 100%);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 30px;
+    border: 1px solid #2a2a4a;
+}
+
+.prices-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.prices-header h3 {
+    color: #00d4ff;
+    font-size: 18px;
+    margin: 0;
+}
+
+.prices-settings {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.prices-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 15px;
+}
+
+/* Для різних розмірів екрану */
+@media (min-width: 1200px) {
+    .prices-grid {
+        grid-template-columns: repeat(5, 1fr);
+    }
+}
+
+@media (min-width: 992px) and (max-width: 1199px) {
+    .prices-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+@media (min-width: 768px) and (max-width: 991px) {
+    .prices-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 767px) {
+    .prices-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.price-card {
+    background: #0f0f1a;
+    border-radius: 12px;
+    padding: 15px;
+    text-align: center;
+    transition: all 0.2s;
+    border: 1px solid #2a2a4a;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+}
+
+.price-card:hover {
+    transform: translateY(-3px);
+    border-color: #00d4ff;
+    box-shadow: 0 5px 20px rgba(0, 212, 255, 0.1);
+}
+
+.price-symbol {
+    font-size: 16px;
+    font-weight: bold;
+    color: #e0e0e0;
+    margin-bottom: 10px;
+}
+
+.price-value {
+    font-size: 22px;
+    font-weight: bold;
+    color: #00d4ff;
+    margin-bottom: 8px;
+}
+
+.price-change {
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 20px;
+    margin: 5px auto;
+}
+
+.price-change.positive {
+    color: #00ff88;
+    background: rgba(0, 255, 136, 0.1);
+}
+
+.price-change.negative {
+    color: #ff4444;
+    background: rgba(255, 68, 68, 0.1);
+}
+
+.price-update-time {
+    font-size: 10px;
+    color: #666;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #2a2a4a;
+}
         .news-item:hover { transform: translateX(5px); background: #252542; }
         .news-positive { border-left-color: #00c853; background: linear-gradient(90deg, #00c85308, #1a1a2e); }
         .news-negative { border-left-color: #ff3b30; background: linear-gradient(90deg, #ff3b3008, #1a1a2e); }
@@ -252,20 +373,74 @@
 
     <div class="container">
         <!-- Дашборд -->
-        <div id="tab-dashboard" class="tab-content active">
-            <div class="stats-grid" id="globalStats">
-                <div class="stat-card"><div class="stat-value" id="totalPnl">$0</div><div class="stat-label">Загальний PnL</div></div>
-                <div class="stat-card"><div class="stat-value" id="totalBalance">$0</div><div class="stat-label">Загальний баланс</div></div>
-                <div class="stat-card"><div class="stat-value" id="activeStrategies">0</div><div class="stat-label">Активні стратегії</div></div>
-                <div class="stat-card"><div class="stat-value" id="totalTrades">0</div><div class="stat-label">Всього угод</div></div>
-            </div>
-            <div class="strategies-grid" id="strategiesContainer"><div class="loading">Завантаження...</div></div>
-            <div style="display: flex; gap: 15px; margin-top: 20px;">
-                <button class="btn-danger" onclick="emergencyStop()">🛑 ЕКСТРЕНА ЗУПИНКА</button>
-                <button class="btn-refresh" onclick="loadAllData()">🔄 Оновити</button>
-                <button onclick="resetAllStrategies()" style="background: #ff8800;">🔄 Скинути всі</button>
+<div id="tab-dashboard" class="tab-content active">
+    <!-- Віджет з поточними цінами -->
+    <div class="prices-widget" id="pricesWidget">
+        <div class="prices-header">
+            <h3>💰 Поточні ціни криптовалют</h3>
+            <div class="prices-settings">
+                <button onclick="openPricesSettings()" class="btn-small" style="background: #2a2a4a; padding: 6px 12px; font-size: 12px;">⚙️ Налаштувати</button>
+                <button onclick="refreshPrices()" class="btn-small btn-refresh" style="padding: 6px 12px; font-size: 12px;">🔄</button>
             </div>
         </div>
+        <div class="prices-grid" id="pricesGrid">
+            <div class="loading">Завантаження цін...</div>
+        </div>
+    </div>
+
+    <div class="stats-grid" id="globalStats">
+        <div class="stat-card"><div class="stat-value" id="totalPnl">$0</div><div class="stat-label">Загальний PnL</div></div>
+        <div class="stat-card"><div class="stat-value" id="totalBalance">$0</div><div class="stat-label">Загальний баланс</div></div>
+        <div class="stat-card"><div class="stat-value" id="activeStrategies">0</div><div class="stat-label">Активні стратегії</div></div>
+        <div class="stat-card"><div class="stat-value" id="totalTrades">0</div><div class="stat-label">Всього угод</div></div>
+    </div>
+
+    <div class="strategies-grid" id="strategiesContainer"><div class="loading">Завантаження...</div></div>
+
+    <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
+        <button class="btn-danger" onclick="emergencyStop()">🛑 ЕКСТРЕНА ЗУПИНКА</button>
+        <button class="btn-refresh" onclick="loadAllData()">🔄 Оновити</button>
+        <button onclick="resetAllStrategies()" style="background: #ff8800;">🔄 Скинути всі</button>
+    </div>
+</div>
+
+<!-- Модальне вікно налаштувань цін -->
+<div id="pricesSettingsModal" class="modal">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3>⚙️ Налаштування віджету цін</h3>
+            <button class="modal-close" onclick="closePricesSettings()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="settings-group" style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; color: #888; font-size: 13px;">📊 Список криптовалют (через кому):</label>
+                <input type="text" id="pricesSymbolsInput" class="symbols-input"
+                       placeholder="BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, XRPUSDT, DOGEUSDT, ADAUSDT"
+                       style="background: #0f0f1a; border: 1px solid #2a2a4a; color: white; padding: 10px; border-radius: 8px; width: 100%; font-family: monospace;">
+                <div style="font-size: 11px; color: #888; margin-top: 5px;">
+                    💡 Введіть пари у форматі: BTCUSDT, ETHUSDT, SOLUSDT<br>
+                    Підтримуються всі пари Bybit
+                </div>
+            </div>
+            <div class="settings-group" style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; color: #888; font-size: 13px;">⏱️ Інтервал оновлення (мс):</label>
+                <input type="number" id="pricesRefreshInterval" min="500" max="10000" step="500"
+                       style="background: #0f0f1a; border: 1px solid #2a2a4a; color: white; padding: 8px; border-radius: 8px; width: 100%;">
+                <div style="font-size: 11px; color: #888; margin-top: 5px;">Рекомендовано: 1000-3000 мс</div>
+            </div>
+            <div class="settings-group" style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; color: #888; font-size: 13px;">
+                    <input type="checkbox" id="pricesShow24hChange" style="margin-right: 8px;">
+                    Показувати зміну за 24 години
+                </label>
+            </div>
+            <div class="settings-row" style="display: flex; gap: 10px; margin-top: 20px;">
+                <button onclick="savePricesSettings()" class="btn-save" style="background: #00d4ff; color: #0a0a0f; padding: 8px 16px;">💾 Зберегти</button>
+                <button onclick="closePricesSettings()" class="btn-cancel" style="background: #2a2a4a; padding: 8px 16px;">❌ Скасувати</button>
+            </div>
+        </div>
+    </div>
+</div>
 
         <!-- Grid Стратегія -->
         <div id="tab-grid" class="tab-content">
@@ -2176,6 +2351,207 @@
                 console.error('Помилка завантаження балансу:', e);
             }
         }
+
+        // ============= ВІДЖЕТ ЦІН =============
+
+let pricesUpdateInterval = null;
+let currentDisplaySymbols = [];
+
+async function loadPricesWidget() {
+    try {
+        const settingsResponse = await fetch('/api/dashboard/settings');
+        const settings = await settingsResponse.json();
+
+        currentDisplaySymbols = settings.display_symbols || ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+        const refreshInterval = settings.refresh_interval || 1000;
+        const show24hChange = settings.show_24h_change !== false;
+
+        const symbolsInput = document.getElementById('pricesSymbolsInput');
+        if (symbolsInput) symbolsInput.value = currentDisplaySymbols.join(', ');
+
+        const intervalInput = document.getElementById('pricesRefreshInterval');
+        if (intervalInput) intervalInput.value = refreshInterval;
+
+        const showChangeCheckbox = document.getElementById('pricesShow24hChange');
+        if (showChangeCheckbox) showChangeCheckbox.checked = show24hChange;
+
+        startPricesUpdates(refreshInterval);
+
+    } catch(e) {
+        console.error('Помилка завантаження налаштувань цін:', e);
+    }
+}
+
+function startPricesUpdates(interval) {
+    if (pricesUpdateInterval) {
+        clearInterval(pricesUpdateInterval);
+    }
+
+    // Перше оновлення одразу
+    updatePricesDisplay();
+
+    // Потім по інтервалу
+    pricesUpdateInterval = setInterval(() => {
+        updatePricesDisplay();
+    }, interval);
+}
+
+async function updatePricesDisplay() {
+    try {
+        const response = await fetch('/api/crypto/prices');
+        const prices = await response.json();
+
+        const grid = document.getElementById('pricesGrid');
+        if (!grid) return;
+
+        if (Object.keys(prices).length === 0) {
+            grid.innerHTML = '<div class="loading">Немає даних</div>';
+            return;
+        }
+
+        // Отримуємо налаштування для показу змін
+        let show24hChange = true;
+        try {
+            const settingsResponse = await fetch('/api/dashboard/settings');
+            const settings = await settingsResponse.json();
+            show24hChange = settings.show_24h_change !== false;
+        } catch(e) {}
+
+        grid.innerHTML = Object.values(prices).map(p => {
+            const changeClass = p.change_24h >= 0 ? 'positive' : 'negative';
+            const changeIcon = p.change_24h >= 0 ? '📈' : '📉';
+            const priceValue = typeof p.price === 'number' ? p.price : 0;
+
+            return `
+                <div class="price-card" onclick="showPriceChart('${p.symbol}')">
+                    <div class="price-symbol">${p.name || p.symbol.replace('USDT', '')}</div>
+                    <div class="price-value">$${priceValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    ${show24hChange ? `
+                        <div class="price-change ${changeClass}">
+                            ${changeIcon} ${p.change_24h >= 0 ? '+' : ''}${p.change_24h}%
+                        </div>
+                    ` : ''}
+                    <div class="price-update-time">оновлено: ${new Date().toLocaleTimeString()}</div>
+                </div>
+            `;
+        }).join('');
+
+    } catch(e) {
+        console.error('Помилка оновлення цін:', e);
+        const grid = document.getElementById('pricesGrid');
+        if (grid) {
+            grid.innerHTML = '<div class="loading">❌ Помилка завантаження цін</div>';
+        }
+    }
+}
+
+// Функція для ручного оновлення
+window.refreshPrices = function() {
+    updatePricesDisplay();
+};
+
+// Відкриття модального вікна налаштувань
+window.openPricesSettings = function() {
+    const modal = document.getElementById('pricesSettingsModal');
+    if (modal) {
+        modal.style.display = 'block';
+    } else {
+        console.error('Модальне вікно не знайдено');
+        alert('Помилка: модальне вікно не знайдено');
+    }
+};
+
+// Закриття модального вікна
+window.closePricesSettings = function() {
+    const modal = document.getElementById('pricesSettingsModal');
+    if (modal) modal.style.display = 'none';
+};
+
+// Збереження налаштувань
+window.savePricesSettings = async function() {
+    const symbolsInput = document.getElementById('pricesSymbolsInput');
+    const refreshInterval = document.getElementById('pricesRefreshInterval');
+    const showChangeCheckbox = document.getElementById('pricesShow24hChange');
+
+    if (!symbolsInput || !refreshInterval || !showChangeCheckbox) {
+        console.error('Елементи форми не знайдено');
+        alert('Помилка: елементи налаштувань не знайдено');
+        return;
+    }
+
+    const symbols = symbolsInput.value.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+    const interval = parseInt(refreshInterval.value) || 1000;
+    const showChange = showChangeCheckbox.checked;
+
+    if (symbols.length === 0) {
+        alert('❌ Введіть хоча б одну криптовалюту');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/dashboard/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                display_symbols: symbols,
+                refresh_interval: interval,
+                show_24h_change: showChange
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('✅ Налаштування збережено!');
+            closePricesSettings();
+            startPricesUpdates(interval);
+            await updatePricesDisplay();
+        } else {
+            alert('❌ Помилка збереження');
+        }
+
+    } catch(e) {
+        console.error('Помилка збереження налаштувань:', e);
+        alert('❌ Помилка: ' + e.message);
+    }
+};
+
+// Показати графік для обраної криптовалюти
+window.showPriceChart = function(symbol) {
+    // Перемикаємо на вкладку Grid і показуємо графік
+    const gridTab = document.querySelector('.tab[data-tab="grid"]');
+    if (gridTab) {
+        gridTab.click();
+        setTimeout(() => {
+            if (typeof window.showGridForSymbol === 'function') {
+                window.showGridForSymbol(symbol);
+            }
+        }, 300);
+    }
+};
+
+// Додаємо функцію resetAllStrategies якщо її немає
+window.resetAllStrategies = async function() {
+    if (!confirm('⚠️ Скинути ВСІ стратегії? Всі дані будуть видалені!')) return;
+    try {
+        const response = await fetch('/api/reset_all', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            alert('✅ Всі стратегії скинуто');
+            loadAllData();
+            if (typeof loadGridStrategy === 'function') loadGridStrategy();
+            if (typeof loadScalpStrategy === 'function') loadScalpStrategy();
+        }
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка: ' + e.message);
+    }
+};
+
+// Ініціалізація при завантаженні сторінки
+document.addEventListener('DOMContentLoaded', () => {
+    loadPricesWidget();
+});
 
         // ============= МЕТРИКИ =============
         async function loadMetrics() {
