@@ -6,10 +6,11 @@ import logging
 import signal
 import threading
 import os
+import sys
 from pathlib import Path
 
 from config import Config
-from database.db import init_db, add_log
+from database.db import init_db, add_log, cleanup_old_price_history
 from web.app import create_flask_app
 from telegram_bot.bot import TelegramBot
 from trading.engine import TradingEngine
@@ -38,6 +39,7 @@ class CryptoBot:
         self.flask_app = None
         self.flask_thread = None
         self.running = True
+        self._cleanup_task = None
 
     async def init(self):
         """Ініціалізація всіх компонентів"""
@@ -54,22 +56,31 @@ class CryptoBot:
         init_db()
         add_log("INFO", "system", "Бот запускається")
 
+        # Очищення старої price_history при запуску
+        try:
+            cleanup_old_price_history(max_days=3)
+            logger.info("Очищення старих даних price_history виконано")
+        except Exception as e:
+            logger.error(f"Помилка очищення price_history: {e}")
+
         # Торговий двигун
         self.trading_engine = TradingEngine(self.config)
-        self.trading_engine.set_telegram_bot(self.telegram_bot)
         await self.trading_engine.init()
-
 
         # Telegram бот
         self.telegram_bot = TelegramBot(self.config, self.trading_engine)
         await self.telegram_bot.init()
+
+        # Передаємо telegram_bot в двигун (після створення)
+        self.trading_engine.set_telegram_bot(self.telegram_bot)
 
         # Flask веб-інтерфейс (в окремому потоці)
         self.flask_app = create_flask_app(self.config, self.trading_engine)
         self.flask_thread = threading.Thread(target=self._run_flask, daemon=True)
         self.flask_thread.start()
 
-
+        # Запускаємо фоновий процес очищення
+        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
 
         logger.info("Crypto Bot успішно ініціалізовано")
 
@@ -81,6 +92,18 @@ class CryptoBot:
         except Exception as e:
             logger.error(f"Помилка запуску Flask: {e}")
 
+    async def _cleanup_loop(self):
+        """Фоновий процес очищення старих даних (раз на добу)"""
+        while self.running:
+            try:
+                await asyncio.sleep(86400)  # 24 години
+                cleanup_old_price_history(max_days=3)
+                logger.info("🔄 Автоматичне очищення price_history виконано")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Помилка в циклі очищення: {e}")
+
     async def run(self):
         """Запуск бота"""
         await self.init()
@@ -89,40 +112,66 @@ class CryptoBot:
         await self.trading_engine.start_all_strategies()
 
         logger.info("Бот запущено")
-        logger.info("Flask веб-інтерфейс: http://localhost:5000")
+        logger.info("🌐 Flask веб-інтерфейс: http://localhost:8080")
+        logger.info("📱 Telegram бот активний")
 
         while self.running:
-            await asyncio.sleep(1)
+            try:
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"Помилка в головному циклі: {e}")
+                await asyncio.sleep(5)
 
-    async def shutdown(self):
+    async def shutdown(self, signum=None, frame=None):
         """Завершення роботи"""
+        if signum:
+            logger.info(f"Отримано сигнал завершення: {signum}")
+
         logger.info("Завершення роботи бота...")
         self.running = False
 
+        # Зупиняємо фоновий процес
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+        # Зупиняємо торговий двигун
         if self.trading_engine:
             await self.trading_engine.shutdown()
+
+        # Зупиняємо Telegram бота
         if self.telegram_bot:
             await self.telegram_bot.shutdown()
 
         add_log("INFO", "system", "Бот завершив роботу")
         logger.info("Бот завершив роботу")
 
+        # Примусовий вихід
+        sys.exit(0)
+
 
 def main():
     bot = CryptoBot()
 
     def signal_handler(sig, frame):
-        asyncio.create_task(bot.shutdown())
+        """Обробник сигналів"""
+        asyncio.create_task(bot.shutdown(sig))
 
+    # Реєстрація обробників сигналів
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
         asyncio.run(bot.run())
     except KeyboardInterrupt:
-        logger.info("Отримано сигнал завершння")
+        logger.info("Отримано сигнал завершення від клавіатури")
     except Exception as e:
         logger.error(f"Критична помилка: {e}")
+        import traceback
+        traceback.print_exc()
         asyncio.run(bot.shutdown())
 
 

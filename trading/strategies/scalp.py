@@ -627,9 +627,11 @@ class ScalpStrategy(BaseStrategy):
         }
         self.locked_balance += cost
         self._save_order(order_id, symbol, 'buy', price, quantity, 'open')
+        await self._save_trade_chart_data(order_id, symbol, datetime.now())
 
         signal_type = "🔥 СИЛЬНИЙ СИГНАЛ" if strong else "✅ Звичайний сигнал"
         add_log("INFO", self.name, f"📈 Відкрито LONG позицію {symbol} @ ${price:.2f} ({signal_type})")
+        # Після успішного відкриття позиції, зберігаємо свічки
 
         # ============= НОВЕ: ТЕЛЕГРАМ СПОВІЩЕННЯ =============
         if self.telegram_bot:
@@ -647,6 +649,10 @@ class ScalpStrategy(BaseStrategy):
 
     async def _close_position(self, symbol: str, reason: str, price: float):
         position = self.open_positions.get(symbol)
+        # Після закриття позиції, оновлюємо свічки до моменту закриття
+        await self._save_trade_chart_data(position['order_id'], symbol,
+                                          datetime.fromisoformat(position['entry_time']),
+                                          datetime.now())
         if not position:
             logger.warning(f"[{symbol}] Позиція не знайдена для закриття")
             return
@@ -776,6 +782,43 @@ class ScalpStrategy(BaseStrategy):
         await self.reset_limits()
 
         add_log("INFO", self.name, "Стратегію скинуто")
+
+    async def _save_trade_chart_data(self, order_id: str, symbol: str, entry_time: datetime,
+                                     exit_time: datetime = None):
+        """Збереження свічок для угоди"""
+        try:
+            from database.db import save_price_history
+
+            # Визначаємо діапазон свічок
+            start_ts = int(entry_time.timestamp() * 1000) - 30 * 60 * 1000  # 30 хв до входу
+
+            if exit_time:
+                end_ts = int(exit_time.timestamp() * 1000) + 30 * 60 * 1000  # 30 хв після виходу
+            else:
+                end_ts = int(entry_time.timestamp() * 1000) + 2 * 3600 * 1000  # 2 години після входу
+
+            duration_min = (end_ts - start_ts) // 60000
+            needed = min(max(duration_min + 20, 100), 1000)
+
+            # Отримуємо свічки
+            klines = await self.exchange.get_klines(symbol, '1', limit=needed)
+
+            # Сортуємо та фільтруємо
+            klines.sort(key=lambda k: k['timestamp'])
+            filtered_klines = [k for k in klines if start_ts <= k['timestamp'] <= end_ts]
+
+            # Додаємо time_iso для зручності
+            for k in filtered_klines:
+                from datetime import datetime
+                k['time_iso'] = datetime.utcfromtimestamp(k['timestamp'] / 1000).strftime('%Y-%m-%dT%H:%M:%S')
+
+            # Зберігаємо в БД
+            save_price_history(order_id, symbol, filtered_klines)
+            logger.info(f"[{symbol}] Збережено {len(filtered_klines)} свічок для угоди {order_id}")
+
+        except Exception as e:
+            logger.error(f"Помилка збереження свічок для угоди {order_id}: {e}")
+
 
     async def emergency_stop(self):
         logger.warning(f"Екстрена зупинка Scalp стратегії")
