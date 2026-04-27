@@ -37,7 +37,18 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-
+        # Таблиця історії сентименту новин
+        cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS news_sentiment_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        overall TEXT,
+                        positive INTEGER,
+                        neutral INTEGER,
+                        negative INTEGER,
+                        articles_count INTEGER
+                    )
+                ''')
         # Таблиця ордерів
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS orders (
@@ -333,6 +344,23 @@ def get_price_history(order_id: str) -> list:
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+def save_sentiment_history(overall: str, positive: int, neutral: int, negative: int, articles_count: int):
+    """Збереження історії сентименту"""
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO news_sentiment_history (overall, positive, neutral, negative, articles_count)
+            VALUES (?, ?, ?, ?, ?)
+        """, (overall, positive, neutral, negative, articles_count))
+
+def get_sentiment_history(limit: int = 50) -> list:
+    """Отримання історії сентименту"""
+    with get_db() as conn:
+        cursor = conn.execute("""
+            SELECT * FROM news_sentiment_history 
+            ORDER BY timestamp DESC LIMIT ?
+        """, (limit,))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
 
 def cleanup_old_price_history(max_days: int = 3):
     """Видалення старих записів price_history (старше max_days днів)"""

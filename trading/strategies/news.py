@@ -185,9 +185,17 @@ class NewsStrategy(BaseStrategy):
             if articles:
                 sent = self.analyze_sentiment(articles)
                 self.current_sentiment = sent['overall']
-                self.sentiment_history.append(
-                    {'timestamp': datetime.now().isoformat(), 'overall': self.current_sentiment, **sent})
-                if len(self.sentiment_history) > 50: self.sentiment_history = self.sentiment_history[-50:]
+
+                # ЗБЕРІГАЄМО В БД
+                from database.db import save_sentiment_history
+                save_sentiment_history(
+                    overall=sent['overall'],
+                    positive=sent['positive'],
+                    neutral=sent['neutral'],
+                    negative=sent['negative'],
+                    articles_count=len(articles)
+                )
+
                 add_log("INFO", self.name,
                         f"Сентимент: {self.current_sentiment} (поз:{sent['positive']}, нег:{sent['negative']})")
                 signal = self._generate_signal(sent)

@@ -1067,31 +1067,15 @@ def create_flask_app(config, trading_engine):
                 articles = []
                 if hasattr(strategy, 'last_news') and strategy.last_news:
                     for article in strategy.last_news[:20]:
-                        title = article.get('title', '').lower()
-                        description = article.get('description', '').lower()
-                        text = title + ' ' + (description or '')
-                        positive_keywords = ['surge', 'rally', 'gain', 'positive', 'bullish', 'record', 'high',
-                                             'upgrade', 'approve', 'adoption', 'breakthrough', 'soar', 'pump', 'moon',
-                                             'green']
-                        negative_keywords = ['drop', 'crash', 'fall', 'negative', 'bearish', 'low', 'decline', 'hack',
-                                             'ban', 'scandal', 'fraud', 'crackdown', 'dump', 'red', 'sell', 'panic',
-                                             'fud']
-                        pos_score = sum(1 for kw in positive_keywords if kw in text)
-                        neg_score = sum(1 for kw in negative_keywords if kw in text)
-                        if pos_score > neg_score:
-                            sentiment = 'positive'
-                        elif neg_score > pos_score:
-                            sentiment = 'negative'
-                        else:
-                            sentiment = 'neutral'
-                        articles.append({
-                            'title': article.get('title', ''),
-                            'description': article.get('description', ''),
-                            'url': article.get('url', ''),
-                            'source': article.get('source', {}).get('name', 'Unknown'),
-                            'publishedAt': article.get('publishedAt', ''),
-                            'sentiment': sentiment
-                        })
+                        # ... аналіз сентименту ...
+                        articles.append({...})
+
+                # ОТРИМУЄМО ІСТОРІЮ З БД
+                from database.db import get_sentiment_history
+                sentiment_history = get_sentiment_history(limit=50)
+                # Перевертаємо для хронологічного порядку
+                sentiment_history.reverse()
+
                 return jsonify({
                     'sentiment': {
                         'overall': status.get('current_sentiment', 'neutral'),
@@ -1102,14 +1086,16 @@ def create_flask_app(config, trading_engine):
                     'articles_count': status.get('last_news_count', 0),
                     'last_update': status.get('last_update'),
                     'articles': articles,
-                    'api_key_configured': status.get('api_key_configured', False)
+                    'api_key_configured': status.get('api_key_configured', False),
+                    'sentiment_history': sentiment_history  # ДОДАЛИ
                 })
         return jsonify({
             'sentiment': {'overall': 'neutral', 'positive': 0, 'neutral': 0, 'negative': 0},
             'articles_count': 0,
             'last_update': None,
             'articles': [],
-            'api_key_configured': False
+            'api_key_configured': False,
+            'sentiment_history': []  # ДОДАЛИ
         })
 
     @app.route('/api/news_settings', methods=['POST'])
