@@ -11,13 +11,7 @@ logger = setup_logger('database')
 # Отримуємо локальний час (Київ UTC+3)
 KYIV_TZ = timezone(timedelta(hours=3))
 
-def get_local_now():
-    """Повертає поточний час у часовій зоні Києва"""
-    return datetime.now(KYIV_TZ).replace(tzinfo=None)
 
-def get_local_now_str():
-    """Повертає поточний час у форматі 'YYYY-MM-DD HH:MM:SS'"""
-    return datetime.now(KYIV_TZ).strftime('%Y-%m-%d %H:%M:%S')
 
 @contextmanager
 def get_db():
@@ -216,6 +210,13 @@ def init_db():
 
         print("База даних успішно ініціалізована")
 
+def get_local_now():
+    """Повертає поточний час у часовій зоні Києва"""
+    return datetime.now(KYIV_TZ).replace(tzinfo=None)
+
+def get_local_now_str():
+    """Повертає поточний час у форматі 'YYYY-MM-DD HH:MM:SS'"""
+    return datetime.now(KYIV_TZ).strftime('%Y-%m-%d %H:%M:%S')
 
 def add_log(level: str, module: str, message: str):
     """Додати лог в БД з локальним часом"""
