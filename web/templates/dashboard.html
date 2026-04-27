@@ -817,23 +817,47 @@
                 const orders = await response.json();
                 const table = document.getElementById('gridOrdersTable');
                 if (!table) return;
-                if (orders.length === 0) { table.innerHTML = '<div class="loading">Немає ордерів</div>'; return; }
-                let html = `<tr><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th><th>Дія</th></tr></thead><tbody>`;
+                if (orders.length === 0) {
+                    table.innerHTML = '<div class="loading">Немає ордерів</div>';
+                    return;
+                }
+
+                let html = `<table>
+                    <thead>
+                        <tr>
+                            <th>Час</th>
+                            <th>Пара</th>
+                            <th>Сторона</th>
+                            <th>Ціна</th>
+                            <th>Кількість</th>
+                            <th>Статус</th>
+                            <th>PnL</th>
+                            <th>Дія</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
                 for (const o of orders) {
-                    html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${o.pnl || 0}, '${o.opened_at}')" style="cursor:pointer;">`;
+                    const pnlValue = parseFloat(o.pnl || 0);
+                    html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${pnlValue}, '${o.opened_at}')" style="cursor:pointer;">`;
                     html += `<td>${new Date(o.opened_at).toLocaleString()}</td>`;
                     html += `<td>${o.symbol}</td>`;
                     html += `<td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td>`;
                     html += `<td>$${parseFloat(o.price).toFixed(2)}</td>`;
                     html += `<td>${parseFloat(o.quantity).toFixed(6)}</td>`;
                     html += `<td>${o.status === 'open' ? '🟢 Відкрито' : (o.status === 'closed' ? '🔒 Закрито' : '❌ Скасовано')}</td>`;
-                    html += `<td class="${(o.pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}">$${(o.pnl || 0).toFixed(2)}</td>`;
-                    html += `<td onclick="event.stopPropagation()">${o.status === 'open' ? `<button class="btn-small" onclick="cancelOrder('grid', '${o.symbol}', '${o.order_id}')">❌</button>` : ''}<table>`;
+                    html += `<td class="${pnlValue >= 0 ? 'stat-positive' : 'stat-negative'}">$${pnlValue.toFixed(2)}</td>`;
+                    html += `<td onclick="event.stopPropagation()">${o.status === 'open' ? `<button class="btn-small" onclick="cancelOrder('grid', '${o.symbol}', '${o.order_id}')">❌</button>` : ''}</td>`;
                     html += `</tr>`;
                 }
-                html += `</tbody></table>`;
+
+                html += `</tbody>
+                </table>`;
                 table.innerHTML = html;
-            } catch(e) { console.error(e); }
+
+            } catch(e) {
+                console.error('Помилка loadGridOrders:', e);
+            }
         }
 
         async function updateGridSettings() {
