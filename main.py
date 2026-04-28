@@ -16,6 +16,7 @@ from telegram_bot.bot import TelegramBot
 from trading.engine import TradingEngine
 from utils.logger_utils import setup_logger
 from monitoring.power_monitor import power_monitor
+
 logger = setup_logger('main')
 
 
@@ -34,6 +35,8 @@ class CryptoBot:
 
         # Перевірка API ключів
         logger.info(f"📊 Bybit API: {'✅ налаштовано' if self.config.BYBIT_API_KEY else '❌ відсутній'}")
+        logger.info(f"📊 Telegram Bot: {'✅ налаштовано' if self.config.TELEGRAM_BOT_TOKEN else '❌ відсутній'}")
+        logger.info(f"📊 News API: {'✅ налаштовано' if self.config.NEWS_API_KEY else '❌ відсутній'}")
 
         # Ініціалізація БД
         init_db()
@@ -58,9 +61,14 @@ class CryptoBot:
         self.flask_thread = threading.Thread(target=self._run_flask, daemon=True)
         self.flask_thread.start()
 
+        # Запускаємо моніторинг електроенергії
         await power_monitor.start()
 
-        logger.info("Crypto Bot успішно ініціалізовано")
+        logger.info("✅ Crypto Bot успішно ініціалізовано")
+        logger.info("🌐 Веб-інтерфейс: http://localhost:8080")
+        logger.info("🔌 WebSocket: ws://localhost:8765")
+        logger.info("📱 Telegram бот активний (команди: /start, /status, /balance, /positions)")
+        logger.info("💡 Для сигналів: перешліть повідомлення боту з коментарем '!signal', 'сигнал', 'signal'")
 
     def _run_flask(self):
         """Запуск Flask в окремому потоці"""
@@ -77,14 +85,13 @@ class CryptoBot:
         # Запускаємо стратегії
         await self.trading_engine.start_all_strategies()
 
-        logger.info("🚀 Бот запущено")
-        logger.info("🌐 Веб-інтерфейс: http://localhost:8080")
-        logger.info("🔌 WebSocket: ws://localhost:8765")
-        logger.info("📱 Telegram бот активний")
+        logger.info("🚀 Бот запущено та готовий до роботи")
 
         while self.running:
             try:
                 await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 logger.error(f"Помилка в головному циклі: {e}")
                 await asyncio.sleep(5)
@@ -97,16 +104,25 @@ class CryptoBot:
         logger.info("Завершення роботи бота...")
         self.running = False
 
+        # Зупиняємо моніторинг електроенергії
+        try:
+            await power_monitor.stop()
+        except Exception as e:
+            logger.error(f"Помилка зупинки power_monitor: {e}")
+
+        # Зупиняємо торговий двигун
         if self.trading_engine:
             await self.trading_engine.shutdown()
 
+        # Зупиняємо Telegram бота
         if self.telegram_bot:
             await self.telegram_bot.shutdown()
 
-        await power_monitor.stop()
-
         add_log("INFO", "system", "Бот завершив роботу")
         logger.info("Бот завершив роботу")
+
+        # Невелика затримка перед виходом
+        await asyncio.sleep(1)
         sys.exit(0)
 
 
@@ -114,7 +130,14 @@ def main():
     bot = CryptoBot()
 
     def signal_handler(sig, frame):
-        asyncio.create_task(bot.shutdown(sig))
+        """Обробник сигналів - створює задачу для завершення"""
+        try:
+            # Отримуємо поточний цикл подій
+            loop = asyncio.get_running_loop()
+            loop.create_task(bot.shutdown(sig))
+        except RuntimeError:
+            # Якщо цикл не запущений, створюємо новий
+            asyncio.run(bot.shutdown(sig))
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -122,12 +145,15 @@ def main():
     try:
         asyncio.run(bot.run())
     except KeyboardInterrupt:
-        logger.info("Отримано сигнал завершення")
+        logger.info("Отримано сигнал завершення від клавіатури")
     except Exception as e:
         logger.error(f"Критична помилка: {e}")
         import traceback
         traceback.print_exc()
-        asyncio.run(bot.shutdown())
+        try:
+            asyncio.run(bot.shutdown())
+        except:
+            pass
 
 
 if __name__ == "__main__":

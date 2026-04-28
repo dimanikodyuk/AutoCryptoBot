@@ -2862,24 +2862,43 @@ async function addManualSignal() {
 }
 
 async function closeSignal(signalId) {
-    if (!confirm('Закрити позицію?')) return;
+    if (!confirm('⚠️ Закрити позицію? Цю дію не можна скасувати!')) return;
+
+    // Показуємо індикатор завантаження
+    const btn = document.querySelector(`button[onclick="closeSignal('${signalId}')"]`);
+    const originalText = btn ? btn.innerText : 'Закрити';
+    if (btn) btn.innerText = '⏳ Закриваю...';
 
     try {
+        // ВАЖЛИВО: Надсилаємо порожній JSON об'єкт
         const response = await fetch(`/api/signals/close/${signalId}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})  // ← порожній об'єкт, а не пустий рядок
         });
 
+        // Перевіряємо статус відповіді
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Помилка:', errorText);
+            throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+        }
+
         const result = await response.json();
+
         if (result.success) {
             alert('✅ Позицію закрито');
             refreshSignalsData();
         } else {
-            alert(`❌ Помилка: ${result.error}`);
+            alert(`❌ Помилка: ${result.error || 'Невідома помилка'}`);
         }
     } catch(e) {
-        console.error(e);
-        alert('❌ Помилка: ' + e.message);
+        console.error('Помилка закриття:', e);
+        alert(`❌ Помилка: ${e.message}`);
+    } finally {
+        if (btn) btn.innerText = originalText;
     }
 }
 

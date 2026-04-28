@@ -13,6 +13,8 @@ import logging
 from utils.logger_utils import setup_logger
 from database.db import get_db, get_price_history
 from datetime import datetime
+from web.hooks import register_webhook_routes
+from web.webhook_routes import register_webhook_routes
 
 logger = setup_logger('web')
 
@@ -668,8 +670,6 @@ def create_flask_app(config, trading_engine):
                 return jsonify({'success': True})
         return jsonify({'error': 'Strategy not found'}), 404
 
-    # Додати в кінець файлу web/app.py, перед return app
-
     @app.route('/api/dashboard/settings', methods=['GET'])
     @async_route
     async def api_dashboard_settings():
@@ -797,23 +797,33 @@ def create_flask_app(config, trading_engine):
     @async_route
     async def api_close_signal(signal_id):
         """Ручне закриття сигналу"""
-        data = request.get_json() or {}
-        price = data.get('price')
+        try:
+            # Отримуємо JSON (навіть якщо порожній)
+            data = {}
+            if request.is_json:
+                data = request.get_json() or {}
 
-        signals_strategy = None
-        for strategy in trading_engine.strategies.values():
-            if strategy.name == 'signals':
-                signals_strategy = strategy
-                break
+            price = data.get('price')
 
-        if not signals_strategy:
-            return jsonify({'error': 'Signals strategy not found'}), 404
+            signals_strategy = None
+            for strategy in trading_engine.strategies.values():
+                if strategy.name == 'signals':
+                    signals_strategy = strategy
+                    break
 
-        success = await signals_strategy.manual_close(signal_id, price)
-        if success:
-            return jsonify({'success': True, 'message': 'Position closed'})
-        else:
-            return jsonify({'error': 'Signal not found or already closed'}), 404
+            if not signals_strategy:
+                return jsonify({'error': 'Signals strategy not found'}), 404
+
+            success = await signals_strategy.manual_close(signal_id, price)
+
+            if success:
+                return jsonify({'success': True, 'message': 'Position closed'})
+            else:
+                return jsonify({'error': 'Signal not found or already closed'}), 404
+
+        except Exception as e:
+            logger.error(f"Помилка api_close_signal: {e}")
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/api/signals/active')
     @async_route
@@ -1637,5 +1647,7 @@ def create_flask_app(config, trading_engine):
 
         threading.Thread(target=restart).start()
         return jsonify({'success': True})
+        # ВЕБ-ХУКИ
 
+    register_webhook_routes(app, trading_engine)
     return app

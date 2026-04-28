@@ -364,21 +364,17 @@ class ScalpStrategy(BaseStrategy):
             lows = [k['low'] for k in klines]
             volumes = [k['volume'] for k in klines]
 
-            # EMA
+            # Існуючі індикатори
             ema9 = await self.calculate_ema(closes, 9)
             ema21 = await self.calculate_ema(closes, 21)
-
-            # RSI
             rsi = await self.calculate_rsi(closes, self.rsi_period)
-
-            # MACD
             macd = await self.calculate_macd(closes)
-
-            # StochRSI
             stoch_rsi = await self.calculate_stoch_rsi(closes)
 
-            # Timeframe
-
+            # НОВІ індикатори
+            bb = await self.calculate_bollinger_bands(closes, period=20, std_dev=2)
+            vp = await self.calculate_volume_profile(klines, num_levels=20)
+            vwap = await self.calculate_vwap(klines)
 
             current_price = closes[-1]
             self.current_prices[symbol] = current_price
@@ -386,83 +382,105 @@ class ScalpStrategy(BaseStrategy):
             current_ema9 = ema9[-1] if ema9 else current_price
             current_ema21 = ema21[-1] if ema21 else current_price
 
-            # ============= НОВІ ФІЛЬТРИ =============
-
-            # 1. Перевірка, чи ціна не на максимумі (не купуємо на піку)
+            # Розрахунок фільтрів
             highest_20 = max(highs[-20:]) if len(highs) >= 20 else current_price
             lowest_20 = min(lows[-20:]) if len(lows) >= 20 else current_price
             price_position = (current_price - lowest_20) / (
                         highest_20 - lowest_20) * 100 if highest_20 != lowest_20 else 50
-
-            # Не купуємо якщо ціна вище 80% діапазону (близько до максимуму)
             is_at_peak = price_position > 80
 
-            # 2. Перевірка тренду (купуємо тільки на зростаючому тренді)
-            # Перевіряємо чи EMA9 вище EMA21 і чи EMA9 зростає
             ema_trend_up = current_ema9 > current_ema21 and (ema9[-2] < ema9[-1] if len(ema9) > 1 else True)
 
-            # 3. Перевірка, що не купуємо після великого зростання
             last_5_change = ((closes[-1] - closes[-6]) / closes[-6] * 100) if len(closes) >= 6 else 0
-            too_much_gain = last_5_change > 3  # Зросло більше ніж на 3% за 5 свічок
+            too_much_gain = last_5_change > 3
 
-            # 4. Додатковий фільтр волатильності
             atr = await self._calculate_atr(highs, lows, closes)
             atr_percent = (atr / current_price) * 100 if current_price > 0 else 0
-            too_volatile = atr_percent > 2  # Занадто волатильно (>2%)
+            too_volatile = atr_percent > 2
 
-            # Об'єм
             avg_volume = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else volumes[-1]
             volume_surge = volumes[-1] > avg_volume * 1.5 if len(volumes) >= 20 else False
-
-            # Додатковий фільтр об'єму - не купуємо при аномально високому об'ємі (розворот)
             volume_too_high = volumes[-1] > avg_volume * 3 if len(volumes) >= 20 else False
 
-            # Комбінований сигнал на покупку
+            # Збір сигналів
             buy_signals = []
             sell_signals = []
 
-            # EMA сигнал
-            ema_bullish = current_ema9 > current_ema21
-            ema_bearish = current_ema9 < current_ema21
+            # EMA сигнали
+            if current_ema9 > current_ema21:
+                buy_signals.append('ema')
+            if current_ema9 < current_ema21:
+                sell_signals.append('ema')
 
-            # RSI сигнал
-            rsi_bullish = rsi < self.rsi_oversold
-            rsi_bearish = rsi > self.rsi_overbought
+            # RSI сигнали
+            if rsi < self.rsi_oversold:
+                buy_signals.append('rsi')
+            if rsi > self.rsi_overbought:
+                sell_signals.append('rsi')
             rsi_neutral = self.rsi_oversold <= rsi <= self.rsi_overbought
 
-            # MACD сигнал
-            macd_bullish = macd['bullish'] or (
-                        macd['histogram'] > 0 and macd['histogram'] > abs(macd['histogram'] * 0.5))
-            macd_bearish = macd['bearish'] or (
-                        macd['histogram'] < 0 and macd['histogram'] < -abs(macd['histogram'] * 0.5))
-
-            # StochRSI сигнал
-            stoch_bullish = stoch_rsi['oversold']
-            stoch_bearish = stoch_rsi['overbought']
-
-            # Підрахунок сигналів
-            if ema_bullish:
-                buy_signals.append('ema')
-            if rsi_bullish:
-                buy_signals.append('rsi')
-            if macd_bullish:
+            # MACD сигнали
+            if macd['bullish'] or (macd['histogram'] > 0 and macd['histogram'] > abs(macd['histogram'] * 0.5)):
                 buy_signals.append('macd')
-            if stoch_bullish:
+            if macd['bearish'] or (macd['histogram'] < 0 and macd['histogram'] < -abs(macd['histogram'] * 0.5)):
+                sell_signals.append('macd')
+
+            # StochRSI сигнали
+            if stoch_rsi['oversold']:
                 buy_signals.append('stoch_rsi')
+            if stoch_rsi['overbought']:
+                sell_signals.append('stoch_rsi')
+
             if volume_surge and not volume_too_high:
                 buy_signals.append('volume')
 
-            if ema_bearish:
-                sell_signals.append('ema')
-            if rsi_bearish:
-                sell_signals.append('rsi')
-            if macd_bearish:
-                sell_signals.append('macd')
-            if stoch_bearish:
-                sell_signals.append('stoch_rsi')
+            # ============= НОВІ СИГНАЛИ =============
+
+            # Bollinger Bands сигнали
+            if bb:
+                if bb['oversold'] and bb['bb_percent_b'] < 0.1:
+                    buy_signals.append('bb_oversold')
+                    logger.debug(f"[{symbol}] BB перепродано: {bb['bb_percent_b']:.2f}")
+                    #add_log("DEBUG", self.name, f"[{symbol}] BB перепродано: {bb['bb_percent_b']:.2f}")
+                elif bb['overbought'] and bb['bb_percent_b'] > 0.9:
+                    sell_signals.append('bb_overbought')
+                    logger.debug(f"[{symbol}] BB перекуплено: {bb['bb_percent_b']:.2f}")
+                    #add_log("DEBUG", self.name, f"[{symbol}] BB перекуплено: {bb['bb_percent_b']:.2f}")
+                if bb['squeeze']:
+                    buy_signals.append('bb_squeeze')
+                    logger.debug(f"[{symbol}] BB звуження (squeeze) - можливий прорив")
+                    add_log("DEBUG", self.name, f"[{symbol}] BB звуження (squeeze) - можливий прорив")
+
+            # Volume Profile сигнали
+            if vp:
+                if vp['is_below_value_area']:
+                    buy_signals.append('vp_support')
+                    logger.debug(f"[{symbol}] Ціна нижче Value Area - підтримка")
+                elif vp['is_above_value_area']:
+                    sell_signals.append('vp_resistance')
+                    logger.debug(f"[{symbol}] Ціна вище Value Area - опір")
+
+                if vp['price_at_poc']:
+                    buy_signals.append('vp_poc')
+                    logger.debug(f"[{symbol}] Ціна на рівні POC ({vp['poc_price']})")
+
+            # VWAP сигнали
+            if vwap:
+                if vwap['below_vwap'] and vwap['deviation_percent'] < -1:
+                    buy_signals.append('vwap_support')
+                    logger.debug(f"[{symbol}] Ціна нижче VWAP на {vwap['deviation_percent']:.1f}% - підтримка")
+                elif vwap['above_vwap'] and vwap['deviation_percent'] > 1:
+                    sell_signals.append('vwap_resistance')
+                    logger.debug(f"[{symbol}] Ціна вище VWAP на {vwap['deviation_percent']:.1f}% - опір")
+
+                if vwap['far_below']:
+                    buy_signals.append('vwap_oversold')
+                    logger.debug(f"[{symbol}] Ціна значно нижче VWAP (2σ) - сильна перепроданість")
+                elif vwap['far_above']:
+                    sell_signals.append('vwap_overbought')
+                    logger.debug(f"[{symbol}] Ціна значно вище VWAP (2σ) - сильна перекупленість")
 
             # Фінальний сигнал з додатковими фільтрами
-            # Для покупки: потрібно 3+ сигнали + не на піку + тренд вгору + не перегріто
             buy_signal = (
                     len(buy_signals) >= 3 and
                     rsi_neutral and
@@ -472,7 +490,6 @@ class ScalpStrategy(BaseStrategy):
                     not too_volatile
             )
 
-            # Сильний сигнал (4+ підтверджень)
             strong_buy = (
                     len(buy_signals) >= 4 and
                     rsi_neutral and
@@ -482,14 +499,21 @@ class ScalpStrategy(BaseStrategy):
                     not too_volatile
             )
 
-            # Сигнал на продаж (для відкриття SHORT - не використовуємо в скальпінгу поки)
             sell_signal = len(sell_signals) >= 3 and rsi_neutral
             strong_sell = len(sell_signals) >= 4
 
             # Логування для діагностики
+            add_log("DEBUG", self.name, f"[{symbol}] Сигнали: покупка={len(buy_signals)}/{buy_signals}, "
+                         f"продаж={len(sell_signals)}/{sell_signals}, "
+                         f"BB={bb['bandwidth']:.1f}% vod if bb else 'N/A', "
+                         f"VWAP={vwap['deviation_percent']:.1f}% if vwap else 'N/A', "
+                         f"VP POC={vp['poc_price'] if vp else 'N/A'}")
+
             logger.debug(f"[{symbol}] Сигнали: покупка={len(buy_signals)}/{buy_signals}, "
-                         f"позиція ціни={price_position:.1f}%, тренд={ema_trend_up}, "
-                         f"перегрів={too_much_gain}, волатильність={atr_percent:.2f}%")
+                         f"продаж={len(sell_signals)}/{sell_signals}, "
+                         f"BB={bb['bandwidth']:.1f}% vod if bb else 'N/A', "
+                         f"VWAP={vwap['deviation_percent']:.1f}% if vwap else 'N/A', "
+                         f"VP POC={vp['poc_price'] if vp else 'N/A'}")
 
             return {
                 'price': current_price,
@@ -498,6 +522,9 @@ class ScalpStrategy(BaseStrategy):
                 'rsi': rsi,
                 'macd': macd,
                 'stoch_rsi': stoch_rsi,
+                'bb': bb,
+                'vp': vp,
+                'vwap': vwap,
                 'volume_surge': volume_surge,
                 'buy_signals': buy_signals,
                 'sell_signals': sell_signals,
@@ -508,8 +535,10 @@ class ScalpStrategy(BaseStrategy):
                 'price_position': price_position,
                 'atr_percent': atr_percent
             }
+
         except Exception as e:
             logger.error(f"Помилка отримання індикаторів {symbol}: {e}")
+            add_log("ERROR", self.name, f"Помилка отримання індикаторів {symbol}: {e}")
             return None
 
     async def on_price_update(self, symbol: str, price: float):
@@ -791,6 +820,205 @@ class ScalpStrategy(BaseStrategy):
             # Примусово видаляємо позицію, щоб уникнути блокування
             if symbol in self.open_positions:
                 del self.open_positions[symbol]
+
+    async def calculate_bollinger_bands(self, prices: List[float], period: int = 20, std_dev: float = 2) -> Dict:
+        """
+        Розрахунок смуг Боллінджера
+
+        Повертає:
+        - upper_band: верхня смуга
+        - middle_band: середня смуга (SMA)
+        - lower_band: нижня смуга
+        - bandwidth: ширина смуг (волатильність)
+        - bb_percent_b: позиція ціни відносно смуг (0-1)
+        - squeeze: звуження смуг (перед проривом)
+        - overbought/oversold: ціна за межами смуг
+        """
+        if len(prices) < period:
+            return None
+
+        # Розраховуємо SMA (просте ковзне середнє)
+        sma = sum(prices[-period:]) / period
+
+        # Розраховуємо стандартне відхилення
+        variance = sum((p - sma) ** 2 for p in prices[-period:]) / period
+        std = variance ** 0.5
+
+        upper_band = sma + (std_dev * std)
+        lower_band = sma - (std_dev * std)
+        bandwidth = (upper_band - lower_band) / sma * 100 if sma > 0 else 0
+
+        # Позиція ціни відносно смуг
+        current_price = prices[-1]
+        if upper_band != lower_band:
+            bb_percent_b = (current_price - lower_band) / (upper_band - lower_band)
+            bb_percent_b = max(0, min(1, bb_percent_b))  # обмежуємо від 0 до 1
+        else:
+            bb_percent_b = 0.5
+
+        # Сигнали
+        squeeze = bandwidth < 5  # Низька волатильність (перед проривом)
+        overbought = current_price > upper_band  # Ціна вище верхньої смуги
+        oversold = current_price < lower_band  # Ціна нижче нижньої смуги
+
+        return {
+            'upper_band': round(upper_band, 2),
+            'middle_band': round(sma, 2),
+            'lower_band': round(lower_band, 2),
+            'bandwidth': round(bandwidth, 2),
+            'bb_percent_b': round(bb_percent_b, 3),
+            'squeeze': squeeze,
+            'overbought': overbought,
+            'oversold': oversold
+        }
+
+    async def calculate_volume_profile(self, klines: List[dict], num_levels: int = 20) -> Dict:
+        """
+        Профіль об'єму - показує розподіл об'ємів за рівнями цін
+
+        Повертає:
+        - poc_price: ціна з максимальним об'ємом (Point of Control)
+        - value_area_high: верхня межа зони цінності (70% об'єму)
+        - value_area_low: нижня межа зони цінності
+        - high_volume_nodes: рівні з високим об'ємом
+        - low_volume_nodes: рівні з низьким об'ємом
+        """
+        if len(klines) < 30:
+            return None
+
+        # Визначаємо діапазон цін
+        all_prices = []
+        for k in klines[-50:]:  # останні 50 свічок
+            all_prices.extend([k['high'], k['low'], k['close']])
+
+        min_price = min(all_prices)
+        max_price = max(all_prices)
+        price_range = max_price - min_price
+
+        if price_range == 0:
+            return None
+
+        level_size = price_range / num_levels
+
+        # Групуємо об'єми по рівнях
+        volume_profile = {}
+        for k in klines[-50:]:
+            price_level = int((k['close'] - min_price) / level_size)
+            price_level = min(price_level, num_levels - 1)  # обмежуємо
+            if price_level not in volume_profile:
+                volume_profile[price_level] = 0
+            volume_profile[price_level] += k['volume']
+
+        # Знаходимо POC (Point of Control) - рівень з максимальним об'ємом
+        poc_level = max(volume_profile, key=volume_profile.get)
+        poc_price = min_price + (poc_level + 0.5) * level_size
+
+        # Розраховуємо Value Area (70% об'єму)
+        total_volume = sum(volume_profile.values())
+        target_volume = total_volume * 0.7
+
+        # Сортуємо рівні за об'ємом (від найбільшого до найменшого)
+        sorted_levels = sorted(volume_profile.items(), key=lambda x: x[1], reverse=True)
+
+        accumulated = 0
+        value_area_levels = []
+        for level, vol in sorted_levels:
+            value_area_levels.append(level)
+            accumulated += vol
+            if accumulated >= target_volume:
+                break
+
+        value_area_high = min_price + (max(value_area_levels) + 1) * level_size
+        value_area_low = min_price + min(value_area_levels) * level_size
+
+        # Вузли з високим/низьким об'ємом
+        avg_volume = total_volume / num_levels if num_levels > 0 else 0
+        high_volume_nodes = []
+        low_volume_nodes = []
+
+        for level, vol in volume_profile.items():
+            price = min_price + (level + 0.5) * level_size
+            if vol > avg_volume * 1.5:
+                high_volume_nodes.append(round(price, 2))
+            elif vol < avg_volume * 0.5:
+                low_volume_nodes.append(round(price, 2))
+
+        current_price = klines[-1]['close']
+
+        return {
+            'poc_price': round(poc_price, 2),
+            'value_area_high': round(value_area_high, 2),
+            'value_area_low': round(value_area_low, 2),
+            'high_volume_nodes': high_volume_nodes[:5],  # максимум 5
+            'low_volume_nodes': low_volume_nodes[:5],
+            'is_above_value_area': current_price > value_area_high,
+            'is_below_value_area': current_price < value_area_low,
+            'price_at_poc': abs(current_price - poc_price) < level_size
+        }
+
+    async def calculate_vwap(self, klines: List[dict]) -> Dict:
+        """
+        VWAP - середньозважена ціна за об'ємом
+
+        Використовується інституційними трейдерами для визначення справедливої ціни
+        """
+        if len(klines) < 20:
+            return None
+
+        total_volume = 0
+        total_value = 0
+
+        # Використовуємо всі доступні свічки для розрахунку
+        for k in klines:
+            # Typical price = (high + low + close) / 3
+            typical_price = (k['high'] + k['low'] + k['close']) / 3
+            total_value += typical_price * k['volume']
+            total_volume += k['volume']
+
+        if total_volume == 0:
+            return None
+
+        vwap = total_value / total_volume
+        current_price = klines[-1]['close']
+
+        # Відхилення від VWAP
+        deviation = (current_price - vwap) / vwap * 100 if vwap > 0 else 0
+
+        # Розраховуємо стандартні відхилення для смуг навколо VWAP
+        if len(klines) > 10:
+            # Розрахунок дисперсії
+            variance_sum = 0
+            for k in klines[-20:]:
+                typical = (k['high'] + k['low'] + k['close']) / 3
+                variance_sum += ((typical - vwap) ** 2) * k['volume']
+
+            variance = variance_sum / total_volume if total_volume > 0 else 0
+            std_dev = variance ** 0.5
+
+            vwap_upper_2 = vwap + 2 * std_dev
+            vwap_lower_2 = vwap - 2 * std_dev
+        else:
+            vwap_upper_2 = vwap * 1.02
+            vwap_lower_2 = vwap * 0.98
+
+        # Сигнали
+        above_vwap = current_price > vwap  # Вище справедливої ціни
+        below_vwap = current_price < vwap  # Нижче справедливої ціни
+        far_above = current_price > vwap_upper_2  # Значно вище (перекуплено)
+        far_below = current_price < vwap_lower_2  # Значно нижче (перепродано)
+        vwap_rejection = abs(deviation) > 2  # Відхилення >2%
+
+        return {
+            'vwap': round(vwap, 2),
+            'vwap_upper_2': round(vwap_upper_2, 2),
+            'vwap_lower_2': round(vwap_lower_2, 2),
+            'deviation_percent': round(deviation, 2),
+            'above_vwap': above_vwap,
+            'below_vwap': below_vwap,
+            'far_above': far_above,
+            'far_below': far_below,
+            'vwap_rejection': vwap_rejection
+        }
 
     async def get_status(self) -> dict:
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades else 0

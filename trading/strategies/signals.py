@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
-
+import json
 from trading.strategies.base import BaseStrategy
 from database.db import get_db, add_log
 from config_manager import get_strategy_settings, save_strategy_settings
@@ -111,28 +111,56 @@ class SignalStrategy(BaseStrategy):
             self.losing_trades = self.total_trades - self.winning_trades
 
             # Активні сигнали (відкриті ордери)
-            orders = conn.execute(
-                "SELECT * FROM orders WHERE strategy_id=? AND status='open'",
-                (self.strategy_id,)
-            ).fetchall()
+            orders = conn.execute("""
+                SELECT o.*, s.name as strategy_name 
+                FROM orders o
+                LEFT JOIN strategies s ON o.strategy_id = s.id
+                WHERE o.strategy_id=? AND o.status='open'
+            """, (self.strategy_id,)).fetchall()
+
             for order in orders:
                 o = dict(order)
-                # Відновлюємо сигнал з метаданих
+
+                # Відновлюємо take_profits з рядка
+                take_profits = []
+                if o.get('take_profits'):
+                    try:
+                        take_profits = [float(x) for x in o['take_profits'].split(',')]
+                    except:
+                        take_profits = []
+
+                # Відновлюємо partial_closes з JSON
+                partial_closes = []
+                if o.get('partial_closes'):
+                    try:
+                        partial_closes = json.loads(o['partial_closes'])
+                    except:
+                        partial_closes = []
+
+                # Визначаємо сигнал типу
+                signal_type = o.get('signal_type') or (
+                    o.get('order_type') if o.get('order_type') in ['LONG', 'SHORT'] else 'LONG')
+
+                # Відновлюємо сигнал
                 signal = Signal(
                     id=o['order_id'],
                     symbol=o['symbol'],
-                    signal_type=o.get('order_type', 'LONG'),
+                    signal_type=signal_type,
                     entry_price=o['price'],
                     entry_limit=None,
-                    stop_loss=0,
-                    take_profits=[],
+                    stop_loss=o.get('stop_loss', 0) or 0,
+                    take_profits=take_profits,
                     trade_size_usdt=o['quantity'] * o['price'],
                     created_at=datetime.fromisoformat(o['opened_at']),
                     status='active',
-                    order_id=o['order_id']
+                    order_id=o['order_id'],
+                    partial_closes=partial_closes
                 )
                 self.active_signals[signal.id] = signal
                 self.locked_balance += o['quantity'] * o['price']
+
+                logger.info(
+                    f"Відновлено сигнал {signal.id}: {signal.signal_type} {signal.symbol}, SL={signal.stop_loss}")
 
     def _save_balance(self):
         with get_db() as conn:
@@ -159,14 +187,33 @@ class SignalStrategy(BaseStrategy):
                 signal.trade_size_usdt, signal.status, signal.created_at.isoformat()
             ))
 
-    def _save_order(self, order_id: str, symbol: str, side: str, price: float, quantity: float, status: str):
+    def _save_order(self, order_id: str, symbol: str, side: str, price: float,
+                    quantity: float, status: str, signal: Signal = None):
+        """Збереження ордера з додатковою інформацією про сигнал"""
         with get_db() as conn:
-            conn.execute("""
-                INSERT OR REPLACE INTO orders 
-                (order_id, strategy_id, symbol, side, price, quantity, status, order_type, opened_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (order_id, self.strategy_id, symbol, side, price, quantity, status, 'Market',
-                  datetime.now().isoformat()))
+            if signal:
+                # Зберігаємо всі дані сигналу
+                conn.execute("""
+                    INSERT OR REPLACE INTO orders 
+                    (order_id, strategy_id, symbol, side, price, quantity, status, 
+                     order_type, opened_at, stop_loss, take_profits, signal_type, partial_closes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    order_id, self.strategy_id, symbol, side, price, quantity, status,
+                    'Market', datetime.now().isoformat(),
+                    signal.stop_loss,
+                    ','.join(map(str, signal.take_profits)),
+                    signal.signal_type,
+                    json.dumps(signal.partial_closes)
+                ))
+            else:
+                # Звичайне збереження
+                conn.execute("""
+                    INSERT OR REPLACE INTO orders 
+                    (order_id, strategy_id, symbol, side, price, quantity, status, order_type, opened_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (order_id, self.strategy_id, symbol, side, price, quantity, status, 'Market',
+                      datetime.now().isoformat()))
 
     def _update_order(self, order_id: str, pnl: float = None, commission: float = None,
                       status: str = None, closed_price: float = None):
@@ -193,46 +240,143 @@ class SignalStrategy(BaseStrategy):
                 conn.execute(query, params)
 
     def parse_signal_text(self, text: str) -> Optional[Dict]:
-        """Парсинг тексту сигналу з Telegram"""
+        """Парсинг тексту сигналу з різних джерел"""
         try:
+            logger.info(f"📝 Парсинг тексту: {text[:200]}...")
+
             # Визначаємо тип сигналу
             if '🟢' in text or 'LONG' in text.upper():
                 signal_type = 'LONG'
             elif '🔴' in text or 'SHORT' in text.upper():
                 signal_type = 'SHORT'
             else:
+                logger.warning("Не вдалося визначити тип сигналу (LONG/SHORT)")
                 return None
 
-            # Шукаємо символ ($SYMBOL або просто SYMBOL)
-            symbol_match = re.search(r'\$([A-Z]+)', text)
-            if not symbol_match:
-                symbol_match = re.search(r'([A-Z]{3,10})(?:\s|$)', text)
-            if not symbol_match:
+            # Шукаємо символ - різні варіанти
+            symbol = None
+
+            # Варіант 1: $ZETA
+            symbol_match = re.search(r'\$([A-Z]{2,10})', text)
+            if symbol_match:
+                symbol = symbol_match.group(1)
+
+            # Варіант 2: LONG - $ZETA або LONG - ZETA
+            if not symbol:
+                symbol_match = re.search(r'(?:LONG|SHORT)\s*[-:]\s*\$?([A-Z]{2,10})', text, re.IGNORECASE)
+                if symbol_match:
+                    symbol = symbol_match.group(1)
+
+            # Варіант 3: просто ZETA в тексті
+            if not symbol:
+                symbol_match = re.search(r'\b([A-Z]{3,8})\b', text)
+                if symbol_match and symbol_match.group(1) not in ['LONG', 'SHORT', 'ENTRY', 'LIMIT', 'RISK']:
+                    symbol = symbol_match.group(1)
+
+            if not symbol:
+                logger.warning("Не вдалося визначити символ")
                 return None
-            symbol = symbol_match.group(1) + 'USDT'
 
-            # Шукаємо Entry price
-            entry_match = re.search(r'Entry[:\s]*([\d.]+)', text, re.IGNORECASE)
-            if not entry_match:
-                entry_match = re.search(r'market\(now\)[:\s]*([\d.]+)', text, re.IGNORECASE)
-            entry_price = float(entry_match.group(1)) if entry_match else None
+            symbol = symbol.upper() + 'USDT'
+            logger.info(f"Визначено символ: {symbol}")
 
-            # Entry limit (опціонально)
-            entry_limit_match = re.search(r'Entry limit[:\s]*([\d.]+)', text, re.IGNORECASE)
-            entry_limit = float(entry_limit_match.group(1)) if entry_limit_match else None
+            # Entry price (різні формати)
+            entry_price = None
+
+            # Entry market: 0.05737
+            entry_match = re.search(r'Entry market[:\s]*([\d.]+)', text, re.IGNORECASE)
+            if entry_match:
+                entry_price = float(entry_match.group(1))
+
+            # Entry: 0.05737
+            if not entry_price:
+                entry_match = re.search(r'Entry[:\s]*([\d.]+)', text, re.IGNORECASE)
+                if entry_match:
+                    entry_price = float(entry_match.group(1))
+
+            # - Entry: 0.05737
+            if not entry_price:
+                entry_match = re.search(r'[-•*]\s*Entry[:\s]*([\d.]+)', text, re.IGNORECASE)
+                if entry_match:
+                    entry_price = float(entry_match.group(1))
+
+            if not entry_price:
+                logger.warning("Не вдалося визначити Entry price")
+                return None
+
+            logger.info(f"Визначено Entry: {entry_price}")
 
             # Stop Loss
+            stop_loss = None
+
             sl_match = re.search(r'SL[:\s]*([\d.]+)', text, re.IGNORECASE)
-            stop_loss = float(sl_match.group(1)) if sl_match else None
+            if sl_match:
+                stop_loss = float(sl_match.group(1))
 
-            # Take Profits (всі рівні)
-            tp_matches = re.findall(r'TP\d+[:\s]*([\d.]+)', text, re.IGNORECASE)
-            take_profits = [float(tp) for tp in tp_matches]
+            if not stop_loss:
+                sl_match = re.search(r'Stop[_-]?Loss[:\s]*([\d.]+)', text, re.IGNORECASE)
+                if sl_match:
+                    stop_loss = float(sl_match.group(1))
 
-            if not entry_price or not stop_loss or not take_profits:
+            if not stop_loss:
+                sl_match = re.search(r'[-•*]\s*SL[:\s]*([\d.]+)', text, re.IGNORECASE)
+                if sl_match:
+                    stop_loss = float(sl_match.group(1))
+
+            if not stop_loss:
+                logger.warning("Не вдалося визначити Stop Loss")
                 return None
 
-            return {
+            logger.info(f"Визначено SL: {stop_loss}")
+
+            # Take Profits (всі рівні)
+            take_profits = []
+
+            # TP1, TP2, TP3, TP4
+            tp_matches = re.findall(r'TP\d+[:\s]*([\d.]+)', text, re.IGNORECASE)
+            if tp_matches:
+                take_profits = [float(tp) for tp in tp_matches]
+
+            # Якщо не знайшло TP з цифрами, шукаємо просто числа після TP
+            if not take_profits:
+                tp_matches = re.findall(r'📈\s*TP\d+[:\s]*([\d.]+)', text)
+                take_profits = [float(tp) for tp in tp_matches]
+
+            # Якщо є TP але в іншому форматі
+            if not take_profits:
+                # Шукаємо всі числа після слів TP
+                lines = text.split('\n')
+                for line in lines:
+                    if 'TP' in line.upper():
+                        nums = re.findall(r'([\d.]+)', line)
+                        for num in nums:
+                            if float(num) != entry_price and float(num) != stop_loss:
+                                take_profits.append(float(num))
+
+            if not take_profits:
+                # Якщо немає TP, створюємо за замовчуванням
+                if signal_type == 'LONG':
+                    take_profits = [
+                        round(entry_price * 1.01, 8),
+                        round(entry_price * 1.02, 8),
+                        round(entry_price * 1.03, 8)
+                    ]
+                else:
+                    take_profits = [
+                        round(entry_price * 0.99, 8),
+                        round(entry_price * 0.98, 8),
+                        round(entry_price * 0.97, 8)
+                    ]
+
+            logger.info(f"Визначено TP: {take_profits[:3]}")
+
+            # Entry limit (опціонально)
+            entry_limit = None
+            limit_match = re.search(r'Entry limit[:\s]*([\d.]+)', text, re.IGNORECASE)
+            if limit_match:
+                entry_limit = float(limit_match.group(1))
+
+            result = {
                 'symbol': symbol,
                 'signal_type': signal_type,
                 'entry_price': entry_price,
@@ -241,8 +385,13 @@ class SignalStrategy(BaseStrategy):
                 'take_profits': take_profits
             }
 
+            logger.info(f"✅ Сигнал успішно розпізнано: {result}")
+            return result
+
         except Exception as e:
             logger.error(f"Помилка парсингу сигналу: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     async def add_signal(self, signal_data: Dict) -> Optional[Signal]:
@@ -291,16 +440,12 @@ class SignalStrategy(BaseStrategy):
     async def _open_position(self, signal: Signal):
         """Відкриття позиції за сигналом"""
         try:
-            # Отримуємо поточну ціну
             current_price = await self.exchange.get_current_price(signal.symbol)
             if current_price <= 0:
                 logger.error(f"[Signals] Не вдалося отримати ціну для {signal.symbol}")
                 return
 
-            # Визначаємо сторону
             side = 'buy' if signal.signal_type == 'LONG' else 'sell'
-
-            # Розраховуємо кількість
             quantity = signal.trade_size_usdt / current_price
             cost = quantity * current_price
 
@@ -308,7 +453,6 @@ class SignalStrategy(BaseStrategy):
                 logger.warning(f"[Signals] Недостатньо балансу: потрібно ${cost:.2f}")
                 return
 
-            # Створюємо ордер
             order_result = await self.exchange.create_order(
                 signal.symbol, side, 'Market', quantity, current_price
             )
@@ -318,9 +462,22 @@ class SignalStrategy(BaseStrategy):
                 return
 
             order_id = f"sig_order_{signal.id}"
-            self._save_order(order_id, signal.symbol, side, current_price, quantity, 'open')
 
-            # Оновлюємо сигнал
+            # Зберігаємо ордер з ВСІМА даними сигналу
+            with get_db() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO orders 
+                    (order_id, strategy_id, symbol, side, price, quantity, status, 
+                     order_type, opened_at, stop_loss, take_profits, signal_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    order_id, self.strategy_id, signal.symbol, side, current_price, quantity, 'open',
+                    signal.signal_type, datetime.now().isoformat(),
+                    signal.stop_loss,
+                    ','.join(map(str, signal.take_profits)),
+                    signal.signal_type
+                ))
+
             signal.status = 'active'
             signal.order_id = order_id
             signal.entry_price = current_price
@@ -331,19 +488,19 @@ class SignalStrategy(BaseStrategy):
             self.locked_balance += cost
             self._save_signal(signal)
 
-            logger.info(f"[Signals] ✅ Відкрито позицію {signal.symbol} @ ${current_price:.8f}")
+            logger.info(f"[Signals] ✅ Відкрито позицію {signal.symbol} @ ${current_price:.8f}, SL={signal.stop_loss}")
 
-            # Telegram сповіщення
             if self.telegram_bot:
                 await self.telegram_bot.send_notification(
                     f"✅ *ВІДКРИТО ПОЗИЦІЮ*\n"
                     f"└ Сигнал: {signal.signal_type} ${signal.symbol}\n"
                     f"└ Ціна: ${current_price:.8f}\n"
+                    f"└ SL: ${signal.stop_loss:.8f}\n"
+                    f"└ TP: {', '.join([f'${tp:.8f}' for tp in signal.take_profits[:3]])}\n"
                     f"└ Розмір: ${signal.trade_size_usdt}",
                     parse_mode='Markdown'
                 )
 
-            # Запускаємо моніторинг
             asyncio.create_task(self._monitor_position(signal))
 
         except Exception as e:
