@@ -21,6 +21,7 @@ class GridStrategy(BaseStrategy):
         self.default_order_size_usdt = saved.get('order_size_usdt', 50)
         self.default_lower_percent = saved.get('lower_percent', 20)
         self.default_upper_percent = saved.get('upper_percent', 20)
+        self.adaptive_range = saved.get('adaptive_range', True)  # ← НОВИЙ РЯДОК
         self.symbols = saved.get('symbols', ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
         self.enabled = saved.get('enabled', False)
 
