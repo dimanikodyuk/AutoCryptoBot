@@ -15,7 +15,7 @@ from web.websocket_server import run_websocket_server
 from telegram_bot.bot import TelegramBot
 from trading.engine import TradingEngine
 from utils.logger_utils import setup_logger
-
+from monitoring.power_monitor import power_monitor
 logger = setup_logger('main')
 
 
@@ -57,6 +57,8 @@ class CryptoBot:
         self.flask_app = create_flask_app(self.config, self.trading_engine)
         self.flask_thread = threading.Thread(target=self._run_flask, daemon=True)
         self.flask_thread.start()
+
+        await power_monitor.start()
 
         logger.info("Crypto Bot успішно ініціалізовано")
 
@@ -100,6 +102,8 @@ class CryptoBot:
 
         if self.telegram_bot:
             await self.telegram_bot.shutdown()
+
+        await power_monitor.stop()
 
         add_log("INFO", "system", "Бот завершив роботу")
         logger.info("Бот завершив роботу")

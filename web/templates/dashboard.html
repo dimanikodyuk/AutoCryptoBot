@@ -525,13 +525,44 @@
             </div>
 
             <div class="stats-grid" id="electricityStats">
-                <div class="stat-card"><div class="stat-value" id="powerCost">-</div><div class="stat-label">Витрачено (грн)</div></div>
-                <div class="stat-card"><div class="stat-value" id="powerEnergy">-</div><div class="stat-label">Спожито (кВт⋅год)</div></div>
-                <div class="stat-card"><div class="stat-value" id="powerMonthly">-</div><div class="stat-label">За місяць (грн)</div></div>
-                <div class="stat-card"><div class="stat-value" id="powerYearly">-</div><div class="stat-label">За рік (грн)</div></div>
-                <div class="stat-card"><div class="stat-value" id="currentPower">-</div><div class="stat-label">Поточна потужність (W)</div></div>
-                <div class="stat-card"><div class="stat-value" id="cpuLoad">-</div><div class="stat-label">CPU</div></div>
-            </div>
+    <div class="stat-card"><div class="stat-value" id="powerCost">-</div><div class="stat-label">Витрачено за сесію (грн)</div></div>
+    <div class="stat-card"><div class="stat-value" id="powerEnergy">-</div><div class="stat-label">Спожито за сесію (кВт⋅год)</div></div>
+    <div class="stat-card"><div class="stat-value" id="powerTotalCost">-</div><div class="stat-label">Всього витрачено (грн)</div></div>
+    <div class="stat-card"><div class="stat-value" id="powerTotalEnergy">-</div><div class="stat-label">Всього спожито (кВт⋅год)</div></div>
+    <div class="stat-card"><div class="stat-value" id="powerSessions">-</div><div class="stat-label">Всього сесій</div></div>
+    <div class="stat-card"><div class="stat-value" id="powerMonth">-</div><div class="stat-label">За місяць (грн)</div></div>
+    <div class="stat-card"><div class="stat-value" id="powerYear">-</div><div class="stat-label">За рік (грн)</div></div>
+    <div class="stat-card"><div class="stat-value" id="currentPower">-</div><div class="stat-label">Поточна потужність (W)</div></div>
+</div>
+
+<!-- Кнопка налаштувань -->
+<div class="settings-panel">
+    <h3>⚙️ Налаштування електроенергії</h3>
+    <div class="settings-row">
+        <label>Ціна за кВт⋅год (грн):</label>
+        <input type="number" id="powerPrice" step="0.01" value="4.32">
+        <label>ККД БЖ (%):</label>
+        <input type="number" id="powerEfficiency" step="1" value="85">
+        <label>Втрати в кабелях (%):</label>
+        <input type="number" id="powerCableLoss" step="1" value="3">
+        <button class="btn-save" onclick="savePowerSettings()">💾 Зберегти налаштування</button>
+    </div>
+</div>
+
+<!-- Графік історії споживання -->
+<div class="chart-card">
+    <h3>📊 Історія споживання електроенергії</h3>
+    <div class="filter-bar">
+        <select id="powerHistoryDays" onchange="loadPowerHistory()">
+            <option value="7">Останні 7 днів</option>
+            <option value="30" selected>Останні 30 днів</option>
+            <option value="90">Останні 90 днів</option>
+            <option value="365">Останній рік</option>
+        </select>
+        <button class="btn-refresh" onclick="loadPowerHistory()">🔄 Оновити</button>
+    </div>
+    <div id="powerHistoryChart" style="height: 400px;"></div>
+</div>
 
             <div class="settings-panel">
                 <h3>🎮 Режим роботи</h3>
@@ -2410,6 +2441,133 @@
                 console.error('Помилка завантаження балансу:', e);
             }
         }
+
+        // ============= МОНІТОРИНГ ЕЛЕКТРОЕНЕРГІЇ =============
+
+async function loadPowerStatus() {
+    try {
+        const response = await fetch('/api/power/status');
+        const data = await response.json();
+
+        document.getElementById('currentPower').innerHTML = `${data.current_power_watts} W`;
+        document.getElementById('powerCost').innerHTML = `${data.session_cost_uah.toFixed(2)} ₴`;
+        document.getElementById('powerEnergy').innerHTML = `${data.session_energy_kwh.toFixed(4)} кВт⋅год`;
+        document.getElementById('powerTotalCost').innerHTML = `${data.total_cost_uah.toFixed(2)} ₴`;
+        document.getElementById('powerTotalEnergy').innerHTML = `${data.total_energy_kwh.toFixed(4)} кВт⋅год`;
+        document.getElementById('powerSessions').innerHTML = `${data.total_hours.toFixed(1)} год`;
+        document.getElementById('powerMonth').innerHTML = `${data.month_cost_uah.toFixed(2)} ₴`;
+        document.getElementById('powerYear').innerHTML = `${data.year_cost_uah.toFixed(2)} ₴`;
+
+    } catch(e) {
+        console.error('Помилка завантаження статусу електроенергії:', e);
+    }
+}
+
+async function loadPowerHistory() {
+    const days = document.getElementById('powerHistoryDays').value;
+
+    try {
+        const response = await fetch(`/api/power/history?days=${days}`);
+        const history = await response.json();
+
+        if (history.length === 0) {
+            document.getElementById('powerHistoryChart').innerHTML = '<div class="loading">Немає даних</div>';
+            return;
+        }
+
+        const dates = history.map(h => h.date);
+        const energy = history.map(h => h.total_energy_kwh);
+        const cost = history.map(h => h.total_cost_uah);
+
+        const traces = [
+            {
+                x: dates,
+                y: energy,
+                type: 'bar',
+                name: 'Спожито (кВт⋅год)',
+                marker: { color: '#00d4ff', opacity: 0.7 },
+                yaxis: 'y'
+            },
+            {
+                x: dates,
+                y: cost,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Витрачено (грн)',
+                line: { color: '#ff8800', width: 2 },
+                marker: { size: 6, color: '#ff8800' },
+                yaxis: 'y2'
+            }
+        ];
+
+        const layout = {
+            title: `Історія споживання електроенергії`,
+            paper_bgcolor: '#1a1a2e',
+            plot_bgcolor: '#1a1a2e',
+            font: { color: '#e0e0e0' },
+            xaxis: { title: 'Дата', gridcolor: '#2a2a4a', tickangle: -45 },
+            yaxis: { title: 'Спожито (кВт⋅год)', gridcolor: '#2a2a4a', side: 'left' },
+            yaxis2: { title: 'Витрачено (грн)', gridcolor: '#2a2a4a', overlaying: 'y', side: 'right' },
+            hovermode: 'x unified'
+        };
+
+        Plotly.newPlot('powerHistoryChart', traces, layout, { responsive: true });
+
+    } catch(e) {
+        console.error('Помилка завантаження історії:', e);
+        document.getElementById('powerHistoryChart').innerHTML = '<div class="loading">❌ Помилка завантаження</div>';
+    }
+}
+
+async function loadPowerSettings() {
+    try {
+        const response = await fetch('/api/power/settings');
+        const settings = await response.json();
+
+        document.getElementById('powerPrice').value = settings.electricity_price || 4.32;
+        document.getElementById('powerEfficiency').value = (settings.psu_efficiency * 100) || 85;
+        document.getElementById('powerCableLoss').value = (settings.cable_loss * 100) || 3;
+
+    } catch(e) {
+        console.error('Помилка завантаження налаштувань:', e);
+    }
+}
+
+async function savePowerSettings() {
+    const price = parseFloat(document.getElementById('powerPrice').value);
+    const efficiency = parseFloat(document.getElementById('powerEfficiency').value) / 100;
+    const cableLoss = parseFloat(document.getElementById('powerCableLoss').value) / 100;
+
+    try {
+        const response = await fetch('/api/power/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                electricity_price: price,
+                psu_efficiency: efficiency,
+                cable_loss: cableLoss
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            alert('✅ Налаштування збережено!');
+            loadPowerStatus();
+        } else {
+            alert('❌ Помилка збереження');
+        }
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка: ' + e.message);
+    }
+}
+
+// Додайте виклики в refreshControlPanel
+function refreshControlPanel() {
+    loadPowerStatus();
+    loadPowerSettings();
+    loadSystemStatus();
+}
 
         // ============= ВІДЖЕТ ЦІН =============
 

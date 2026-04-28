@@ -864,6 +864,49 @@ def create_flask_app(config, trading_engine):
                 return jsonify(status)
         return jsonify({'error': 'Strategy not found'}), 404
 
+    # ============= МОНІТОРИНГ ЕЛЕКТРОЕНЕРГІЇ API =============
+
+    @app.route('/api/power/status')
+    @async_route
+    async def api_power_status():
+        """Поточний статус моніторингу"""
+        from monitoring.power_monitor import power_monitor
+        stats = await power_monitor.get_current_stats()
+        return jsonify(stats)
+
+    @app.route('/api/power/history')
+    @async_route
+    async def api_power_history():
+        """Історія споживання"""
+        days = request.args.get('days', 30, type=int)
+        from database.power_monitor_db import get_power_history
+        history = get_power_history(days)
+        return jsonify(history)
+
+    @app.route('/api/power/settings', methods=['GET'])
+    @async_route
+    async def api_power_settings_get():
+        """Отримання налаштувань"""
+        from database.power_monitor_db import get_power_settings
+        settings = get_power_settings()
+        return jsonify(settings)
+
+    @app.route('/api/power/settings', methods=['POST'])
+    @async_route
+    async def api_power_settings_update():
+        """Оновлення налаштувань"""
+        data = request.get_json()
+        from database.power_monitor_db import update_power_settings
+        from monitoring.power_monitor import power_monitor
+
+        # Оновлюємо в БД
+        update_power_settings(data)
+
+        # Оновлюємо в пам'яті
+        power_monitor._load_settings()
+
+        return jsonify({'success': True})
+
     # ============= База даних API =============
 
     @app.route('/api/db_tables_list')
