@@ -573,6 +573,7 @@ class ScalpStrategy(BaseStrategy):
         # Перевірка лімітів
         if not self.can_trade(self.trade_size_usdt):
             logger.warning(f"[Scalp] Торгівля заблокована: {self._block_reason}")
+            add_log("WARNING", self.name, f"Торгівля заблокована: {self._block_reason}")
             return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
 
         results = {}
@@ -582,19 +583,28 @@ class ScalpStrategy(BaseStrategy):
             try:
                 indicators = await self.get_indicators(symbol)
                 if not indicators:
+                    add_log("DEBUG", self.name, f"Немає індикаторів для {symbol}")
                     continue
 
                 price = indicators['price']
+
+                add_log("DEBUG", self.name,
+                        f"[{symbol}] RSI={indicators['rsi']:.1f}, MACD={indicators['macd']['histogram']:.4f}, "
+                        f"Buy={indicators['buy_signals']}, Sell={indicators['sell_signals']}, "
+                        f"Price=${price:.2f}")
+
                 logger.info(f"[{symbol}] RSI={indicators['rsi']:.1f}, MACD={indicators['macd']['histogram']:.2f}, "
                             f"StochK={indicators['stoch_rsi']['k']:.1f}, Buy={indicators['buy_signals']}, Sell={indicators['sell_signals']}")
 
                 if symbol in self.open_positions:
                     exit_signal = await self.check_exit_signals(symbol, self.open_positions[symbol], price)
                     if exit_signal != 'hold':
+                        add_log("INFO", self.name, f"[{symbol}] Вихід за сигналом: {exit_signal}")
                         await self._close_position(symbol, exit_signal, price)
                 else:
                     # Перевіряємо чи є вільний баланс
                     if self.available_balance < self.trade_size_usdt:
+                        add_log("DEBUG", self.name, f"[{symbol}] Недостатньо балансу для входу")
                         logger.debug(f"[{symbol}] Недостатньо балансу для входу: потрібно ${self.trade_size_usdt:.2f}, "
                                      f"доступно ${self.available_balance:.2f}")
                         continue
@@ -604,15 +614,19 @@ class ScalpStrategy(BaseStrategy):
                         logger.info(
                             f"[{symbol}] 🔥 СИЛЬНИЙ СИГНАЛ НА ПОКУПКУ! Підтвердження: {indicators['buy_signals']}")
                         signals_generated.append(f"{symbol}: STRONG_BUY")
+                        add_log("INFO", self.name, f"[{symbol}] 🔥 СИЛЬНИЙ СИГНАЛ НА ПОКУПКУ!")
                         await self._open_position(symbol, price, strong=True)
                     elif indicators['buy_signal']:
+                        add_log("INFO", self.name, f"[{symbol}] ✅ Сигнал на покупку!")
                         logger.info(f"[{symbol}] ✅ Сигнал на покупку! Підтвердження: {indicators['buy_signals']}")
                         signals_generated.append(f"{symbol}: BUY")
                         await self._open_position(symbol, price, strong=False)
 
             except Exception as e:
                 logger.error(f"Помилка аналізу {symbol}: {e}")
+                add_log("ERROR", self.name, f"Помилка аналізу {symbol}: {e}")
 
+        add_log("DEBUG", self.name, f"Аналіз завершено, сигналів: {len(signals_generated)}")
         return {'action': 'hold', 'results': results, 'signals': signals_generated}
 
     async def execute(self, signal: dict):

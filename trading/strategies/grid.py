@@ -184,18 +184,21 @@ class GridStrategy(BaseStrategy):
 
         # Перевірка лімітів
         if not self.can_trade():
-            logger.warning(f"[Grid] Торгівля заблокована: {self._block_reason}")
+            logger.warning(f"[Grid] Торгівля заблокована: {self._block_reason}"
+            add_log("WARNING", self.name, f"Торгівля заблокована: {self._block_reason}")
             return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
 
         for sym, grid in self.grids.items():
             price = await self.exchange.get_current_price(sym)
             if price > 0:
                 await grid.update_price(price)
+                add_log("DEBUG", self.name, f"Оновлено ціну {sym}: ${price:.2f}")
 
         self.total_pnl = sum(g.total_pnl for g in self.grids.values())
         self.total_trades = sum(g.total_trades for g in self.grids.values())
         self.winning_trades = sum(g.winning_trades for g in self.grids.values())
 
+        add_log("DEBUG", self.name, f"Аналіз завершено: PnL=${self.total_pnl:.2f}, Trades={self.total_trades}")
         return {'action': 'hold'}
 
     async def execute(self, signal: dict):

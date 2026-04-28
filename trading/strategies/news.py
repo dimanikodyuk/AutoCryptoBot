@@ -197,19 +197,24 @@ class NewsStrategy(BaseStrategy):
             return {'action': 'hold'}
 
         if not self.can_trade():
+            add_log("WARNING", self.name, f"Торгівля заблокована: {self._block_reason}")
             logger.warning(f"[News] Торгівля заблокована: {self._block_reason}")
             return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
 
         need_update = (self.last_update is None or (
                     datetime.now() - self.last_update).seconds > self.interval_minutes * 60)
         if need_update:
+            add_log("INFO", self.name, "Початок оновлення новин")
             logger.info("Оновлення новин...")
             articles = await self.fetch_news()
             self.last_news = articles
             self.last_update = datetime.now()
+            add_log("INFO", self.name, f"Отримано {len(articles)} новин")
             if articles:
                 sent = self.analyze_sentiment(articles)
                 self.current_sentiment = sent['overall']
+                add_log("INFO", self.name,
+                        f"Сентимент: {self.current_sentiment} (поз:{sent['positive']}, нег:{sent['negative']}, нейтр:{sent['neutral']})")
 
                 # ЗБЕРІГАЄМО В БД
                 from database.db import save_sentiment_history
@@ -225,6 +230,8 @@ class NewsStrategy(BaseStrategy):
                         f"Сентимент: {self.current_sentiment} (поз:{sent['positive']}, нег:{sent['negative']})")
                 signal = self._generate_signal(sent)
                 return signal
+            else:
+                add_log("DEBUG", self.name, f"Оновлення не потрібно, наступне через {self.interval_minutes} хв")
         return {'action': 'hold', 'sentiment': self.current_sentiment}
 
     def _generate_signal(self, sent):

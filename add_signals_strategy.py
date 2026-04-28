@@ -1,4 +1,3 @@
-# fix_signals_table.py
 import sqlite3
 from pathlib import Path
 
@@ -7,16 +6,17 @@ DB_PATH = Path(__file__).parent / "trading_bot.db"
 conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
 
-# Перевіряємо чи є колонка order_id
-cursor.execute("PRAGMA table_info(signals)")
-columns = [col[1] for col in cursor.fetchall()]
+# Встановлюємо DEBUG для всіх модулів
+modules = ['main', 'engine', 'exchange', 'grid', 'grid_manager', 'scalp', 'news', 'web', 'telegram', 'database', 'backtest', 'signals']
 
-if 'order_id' not in columns:
-    print("Додаємо колонку order_id...")
-    cursor.execute("ALTER TABLE signals ADD COLUMN order_id TEXT")
-    print("✅ Колонку order_id додано")
-else:
-    print("✅ Колонка order_id вже існує")
+for module in modules:
+    cursor.execute("""
+        INSERT OR REPLACE INTO log_settings (module, log_level, updated_at)
+        VALUES (?, 'DEBUG', CURRENT_TIMESTAMP)
+    """, (module,))
+    print(f"✅ {module}: DEBUG")
 
 conn.commit()
 conn.close()
+print("\n✅ Всі модулі переведено в режим DEBUG")
+print("Перезапустіть бота")

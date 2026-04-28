@@ -243,9 +243,22 @@ def get_local_now_str():
     """Повертає поточний час у форматі 'YYYY-MM-DD HH:MM:SS'"""
     return datetime.now(KYIV_TZ).strftime('%Y-%m-%d %H:%M:%S')
 
+
 def add_log(level: str, module: str, message: str):
-    """Додати лог в БД з локальним часом"""
+    """Додати лог в БД з локальним часом - тепер зберігає ВСІ рівні"""
     try:
+        # Отримуємо налаштований рівень для модуля
+        log_level_config = get_log_settings().get(module, 'INFO')
+
+        # Рівні пріоритету
+        levels = {'DEBUG': 0, 'INFO': 1, 'WARNING': 2, 'ERROR': 3}
+        current_priority = levels.get(level, 1)
+        config_priority = levels.get(log_level_config, 1)
+
+        # Пропускаємо якщо рівень нижче налаштованого
+        if current_priority < config_priority:
+            return
+
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO logs (timestamp, level, module, message) VALUES (?, ?, ?, ?)",
