@@ -132,17 +132,33 @@ class ScalpStrategy(BaseStrategy):
                 "SELECT * FROM orders WHERE strategy_id = ? AND status = 'open'",
                 (self.strategy_id,)
             ).fetchall()
+
             for order in orders:
                 o = dict(order)
                 if o['side'] == 'buy':
+                    # Розраховуємо Stop Loss та Take Profit якщо вони не збережені в БД
+                    stop_loss = o.get('stop_loss')
+                    take_profit = o.get('take_profit')
+
+                    if not stop_loss or stop_loss == 0:
+                        stop_loss = o['price'] * (1 - self.stop_loss_percent / 100)
+                    if not take_profit or take_profit == 0:
+                        take_profit = o['price'] * (1 + self.take_profit_percent / 100)
+
                     self.open_positions[o['symbol']] = {
                         'order_id': o['order_id'],
                         'entry_price': o['price'],
                         'quantity': o['quantity'],
                         'highest_price': o['price'],
-                        'lowest_price': o['price']
+                        'lowest_price': o['price'],
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'opened_at': o.get('opened_at', datetime.now().isoformat())
                     }
                     self.locked_balance += o['quantity'] * o['price']
+
+                    logger.info(
+                        f"Відновлено позицію {o['symbol']}: entry={o['price']}, SL={stop_loss}, TP={take_profit}")
 
             stats = conn.execute(
                 "SELECT SUM(pnl) as pnl, COUNT(*) as cnt FROM orders WHERE strategy_id = ? AND status = 'closed'",
@@ -200,14 +216,15 @@ class ScalpStrategy(BaseStrategy):
             'quantity': position['quantity']
         }
 
-    def _save_order(self, order_id: str, symbol: str, side: str, price: float, quantity: float, status: str):
+    def _save_order(self, order_id: str, symbol: str, side: str, price: float, quantity: float, status: str,
+                    stop_loss: float = None, take_profit: float = None):
         with get_db() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO orders 
-                (order_id, strategy_id, symbol, side, price, quantity, status, order_type, opened_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (order_id, strategy_id, symbol, side, price, quantity, status, order_type, opened_at, stop_loss, take_profit)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (order_id, self.strategy_id, symbol, side, price, quantity, status, 'Market',
-                  datetime.now().isoformat()))
+                  datetime.now().isoformat(), stop_loss, take_profit))
 
     def _update_order(self, order_id: str, pnl: float = None, commission: float = None, status: str = None):
         with get_db() as conn:
@@ -586,16 +603,22 @@ class ScalpStrategy(BaseStrategy):
 
         pnl_percent = (current_price - position['entry_price']) / position['entry_price'] * 100
 
-        # Трейлінг стоп
-        trailing_stop_price = position['highest_price'] * (1 - self.trailing_stop_percent / 100)
-        if trailing_stop_price > position['entry_price'] and current_price <= trailing_stop_price:
-            return 'trailing_stop'
+        # Використовуємо збережений Stop Loss
+        stop_loss = position.get('stop_loss', position['entry_price'] * (1 - self.stop_loss_percent / 100))
 
-        # Take profit та Stop loss
+        # Stop Loss перевірка
+        if current_price <= stop_loss:
+            return 'stop_loss'
+
+        # Трейлінг стоп
+        if self.trailing_stop_percent > 0:
+            trailing_stop_price = position['highest_price'] * (1 - self.trailing_stop_percent / 100)
+            if trailing_stop_price > position['entry_price'] and current_price <= trailing_stop_price:
+                return 'trailing_stop'
+
+        # Take profit
         if pnl_percent >= self.take_profit_percent:
             return 'take_profit'
-        if pnl_percent <= -self.stop_loss_percent:
-            return 'stop_loss'
 
         return 'hold'
 
@@ -694,44 +717,59 @@ class ScalpStrategy(BaseStrategy):
         return True
 
     async def _open_position(self, symbol: str, price: float, strong: bool = False):
-        quantity = self.trade_size_usdt / price
-        cost = quantity * price
+        # Отримуємо актуальну ціну
+        current_price = await self.exchange.get_current_price(symbol)
+
+        # Перевірка зміни ціни
+        price_diff_pct = abs(current_price - price) / price * 100 if price > 0 else 0
+        if price_diff_pct > 2:
+            logger.warning(f"[{symbol}] Ціна змінилась на {price_diff_pct:.2f}%! Позиція НЕ відкрита")
+            return
+
+        quantity = self.trade_size_usdt / current_price
+        cost = quantity * current_price
 
         if self.available_balance < cost:
-            logger.warning(f"[{symbol}] Недостатньо балансу для входу: потрібно ${cost:.2f}")
+            logger.warning(f"[{symbol}] Недостатньо балансу: потрібно ${cost:.2f}")
             return
 
         order_id = f"scalp_{symbol}_{int(datetime.now().timestamp())}_{self.strategy_id}"
 
-        result = await self.exchange.create_order(symbol, 'buy', 'Market', quantity, price)
+        result = await self.exchange.create_order(symbol, 'buy', 'Market', quantity, current_price)
 
         if result.get('error'):
             logger.error(f"Помилка відкриття позиції {symbol}: {result}")
             return
 
+        # Розраховуємо Stop Loss ціну
+        stop_loss_price = current_price * (1 - self.stop_loss_percent / 100)
+
         self.open_positions[symbol] = {
             'order_id': order_id,
-            'entry_price': price,
+            'entry_price': current_price,
             'quantity': quantity,
-            'highest_price': price,
-            'lowest_price': price,
+            'highest_price': current_price,
+            'lowest_price': current_price,
+            'stop_loss': stop_loss_price,  # ← ДОДАЄМО ЗБЕРЕЖЕННЯ SL
+            'take_profit': current_price * (1 + self.take_profit_percent / 100),
             'strong_signal': strong,
-            'opened_at': datetime.now().isoformat()  # ДОДАЙ ЦЕЙ РЯДОК
+            'opened_at': datetime.now().isoformat()
         }
+
         self.locked_balance += cost
-        self._save_order(order_id, symbol, 'buy', price, quantity, 'open')
+        self._save_order(order_id, symbol, 'buy', current_price, quantity, 'open')
         await self._save_trade_chart_data(order_id, symbol, datetime.now())
 
         signal_type = "🔥 СИЛЬНИЙ СИГНАЛ" if strong else "✅ Звичайний сигнал"
-        add_log("INFO", self.name, f"📈 Відкрито LONG позицію {symbol} @ ${price:.2f} ({signal_type})")
-        # Після успішного відкриття позиції, зберігаємо свічки
+        add_log("INFO", self.name,
+                f"📈 Відкрито LONG позицію {symbol} @ ${current_price:.2f}, SL=${stop_loss_price:.2f} ({signal_type})")
 
-        # ============= НОВЕ: ТЕЛЕГРАМ СПОВІЩЕННЯ =============
         if self.telegram_bot:
             await self.telegram_bot.send_notification(
                 f"📈 *ВІДКРИТО ПОЗИЦІЮ* (Scalp)\n"
                 f"└ Пара: `{symbol}`\n"
-                f"└ Ціна: `${price:.2f}`\n"
+                f"└ Ціна: `${current_price:.2f}`\n"
+                f"└ SL: `${stop_loss_price:.2f}`\n"
                 f"└ Розмір: `{quantity:.6f}`\n"
                 f"└ Сигнал: {signal_type}",
                 parse_mode='Markdown'
