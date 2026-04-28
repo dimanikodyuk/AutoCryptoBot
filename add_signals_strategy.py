@@ -1,4 +1,4 @@
-# add_signals_to_db.py
+# add_signals_table.py
 import sqlite3
 from pathlib import Path
 
@@ -7,24 +7,40 @@ DB_PATH = Path(__file__).parent / "trading_bot.db"
 conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
 
-# Перевіряємо чи є стратегія
-cursor.execute("SELECT id, name FROM strategies")
-existing = cursor.fetchall()
-print("Існуючі стратегії:", existing)
+# Створюємо таблицю signals
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS signals (
+        id TEXT PRIMARY KEY,
+        strategy_id INTEGER,
+        symbol TEXT,
+        signal_type TEXT,
+        entry_price REAL,
+        entry_limit REAL,
+        stop_loss REAL,
+        take_profits TEXT,
+        trade_size_usdt REAL,
+        status TEXT,
+        created_at TIMESTAMP,
+        closed_at TIMESTAMP,
+        total_pnl REAL DEFAULT 0,
+        order_id TEXT,
+        FOREIGN KEY (strategy_id) REFERENCES strategies(id)
+    )
+''')
 
-# Додаємо signals якщо немає
-cursor.execute("""
-    INSERT OR IGNORE INTO strategies (name, enabled, mode, drawdown_limit) 
-    VALUES ('signals', 1, 'simulation', 10)
-""")
+# Додаємо індекси
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at)')
 
-# Перевіряємо результат
-cursor.execute("SELECT id, name, enabled FROM strategies")
-strategies = cursor.fetchall()
-print("\n📋 Стратегії після додавання:")
-for s in strategies:
-    print(f"  ID: {s[0]}, Name: {s[1]}, Enabled: {s[2]}")
+print("✅ Таблицю signals створено")
+
+# Перевіряємо
+cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='signals'")
+if cursor.fetchone():
+    print("✅ Таблиця signals існує")
+else:
+    print("❌ Помилка: таблиця не створена")
 
 conn.commit()
 conn.close()
-print("\n✅ Готово! Перезапустіть бота.")
