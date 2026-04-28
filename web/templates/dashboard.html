@@ -2762,19 +2762,38 @@ async function testComponent(component) {
 async function loadPowerStatus() {
     try {
         const response = await fetch('/api/power/status');
+
+        // Перевіряємо чи відповідь OK
+        if (!response.ok) {
+            console.warn('Power API не доступний, статус:', response.status);
+            // Встановлюємо значення за замовчуванням
+            document.getElementById('currentPower').innerHTML = 'N/A';
+            document.getElementById('powerCost').innerHTML = '0 ₴';
+            document.getElementById('powerEnergy').innerHTML = '0 кВт⋅год';
+            document.getElementById('powerTotalCost').innerHTML = '0 ₴';
+            document.getElementById('powerTotalEnergy').innerHTML = '0 кВт⋅год';
+            document.getElementById('powerSessions').innerHTML = '0 год';
+            document.getElementById('powerMonth').innerHTML = '0 ₴';
+            document.getElementById('powerYear').innerHTML = '0 ₴';
+            return;
+        }
+
         const data = await response.json();
 
-        document.getElementById('currentPower').innerHTML = `${data.current_power_watts} W`;
-        document.getElementById('powerCost').innerHTML = `${data.session_cost_uah.toFixed(2)} ₴`;
-        document.getElementById('powerEnergy').innerHTML = `${data.session_energy_kwh.toFixed(4)} кВт⋅год`;
-        document.getElementById('powerTotalCost').innerHTML = `${data.total_cost_uah.toFixed(2)} ₴`;
-        document.getElementById('powerTotalEnergy').innerHTML = `${data.total_energy_kwh.toFixed(4)} кВт⋅год`;
-        document.getElementById('powerSessions').innerHTML = `${data.total_hours.toFixed(1)} год`;
-        document.getElementById('powerMonth').innerHTML = `${data.month_cost_uah.toFixed(2)} ₴`;
-        document.getElementById('powerYear').innerHTML = `${data.year_cost_uah.toFixed(2)} ₴`;
+        document.getElementById('currentPower').innerHTML = `${data.current_power_watts || 0} W`;
+        document.getElementById('powerCost').innerHTML = `${(data.session_cost_uah || 0).toFixed(2)} ₴`;
+        document.getElementById('powerEnergy').innerHTML = `${(data.session_energy_kwh || 0).toFixed(4)} кВт⋅год`;
+        document.getElementById('powerTotalCost').innerHTML = `${(data.total_cost_uah || 0).toFixed(2)} ₴`;
+        document.getElementById('powerTotalEnergy').innerHTML = `${(data.total_energy_kwh || 0).toFixed(4)} кВт⋅год`;
+        document.getElementById('powerSessions').innerHTML = `${(data.total_hours || 0).toFixed(1)} год`;
+        document.getElementById('powerMonth').innerHTML = `${(data.month_cost_uah || 0).toFixed(2)} ₴`;
+        document.getElementById('powerYear').innerHTML = `${(data.year_cost_uah || 0).toFixed(2)} ₴`;
 
     } catch(e) {
         console.error('Помилка завантаження статусу електроенергії:', e);
+        // Встановлюємо значення за замовчуванням при помилці
+        const defaultElem = document.getElementById('currentPower');
+        if (defaultElem) defaultElem.innerHTML = 'N/A';
     }
 }
 
