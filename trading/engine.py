@@ -97,7 +97,7 @@ class TradingEngine:
                     strategy.enabled = bool(s['enabled'])
                     self.strategies[s['id']] = strategy
                     logger.info(f"Завантажено Signals стратегію (id={s['id']}, enabled={strategy.enabled})")
-
+ 
         # Запуск WebSocket
         await self.exchange.start_websocket(self.config.SYMBOLS)
 
