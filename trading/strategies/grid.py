@@ -184,7 +184,7 @@ class GridStrategy(BaseStrategy):
 
         # Перевірка лімітів
         if not self.can_trade():
-            logger.warning(f"[Grid] Торгівля заблокована: {self._block_reason}"
+            logger.warning(f"[Grid] Торгівля заблокована: {self._block_reason}")
             add_log("WARNING", self.name, f"Торгівля заблокована: {self._block_reason}")
             return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
 
