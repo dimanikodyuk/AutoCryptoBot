@@ -880,9 +880,47 @@ def create_flask_app(config, trading_engine):
     @async_route
     async def api_power_status():
         """Поточний статус моніторингу"""
-        from monitoring.power_monitor import power_monitor
-        stats = await power_monitor.get_current_stats()
-        return jsonify(stats)
+        try:
+            from monitoring.power_monitor import power_monitor
+
+            # Перевіряємо чи монітор запущений
+            if not power_monitor.running:
+                # Повертаємо пусті дані, якщо монітор не запущений
+                return jsonify({
+                    'current_power_watts': 0,
+                    'uptime_seconds': 0,
+                    'uptime_hours': 0,
+                    'session_id': None,
+                    'session_energy_kwh': 0,
+                    'session_cost_uah': 0,
+                    'total_energy_kwh': 0,
+                    'total_cost_uah': 0,
+                    'total_hours': 0,
+                    'month_energy_kwh': 0,
+                    'month_cost_uah': 0,
+                    'year_energy_kwh': 0,
+                    'year_cost_uah': 0
+                })
+
+            stats = await power_monitor.get_current_stats()
+            return jsonify(stats)
+        except Exception as e:
+            logger.error(f"Помилка power/status: {e}")
+            return jsonify({
+                'current_power_watts': 0,
+                'uptime_seconds': 0,
+                'uptime_hours': 0,
+                'session_id': None,
+                'session_energy_kwh': 0,
+                'session_cost_uah': 0,
+                'total_energy_kwh': 0,
+                'total_cost_uah': 0,
+                'total_hours': 0,
+                'month_energy_kwh': 0,
+                'month_cost_uah': 0,
+                'year_energy_kwh': 0,
+                'year_cost_uah': 0
+            })
 
     @app.route('/api/power/history')
     @async_route
