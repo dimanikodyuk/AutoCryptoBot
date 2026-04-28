@@ -1575,6 +1575,247 @@ def create_flask_app(config, trading_engine):
             traceback.print_exc()
             return jsonify({'error': str(e)}), 500
 
+    # ============= ДІАГНОСТИКА API =============
+
+    @app.route('/api/health/status')
+    @async_route
+    async def api_health_status():
+        """Загальний статус системи"""
+        import psutil
+        import time
+        from pathlib import Path
+        from database.db import get_db
+
+        result = {
+            'timestamp': time.time(),
+            'overall': 'healthy',
+            'components': {}
+        }
+
+        # ===== База даних =====
+        try:
+            with get_db() as conn:
+                size = Path('trading_bot.db').stat().st_size if Path('trading_bot.db').exists() else 0
+                tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+                result['components']['database'] = {
+                    'status': 'healthy',
+                    'size_mb': round(size / 1024 / 1024, 2),
+                    'tables': len(tables),
+                    'message': f"{len(tables)} таблиць, {round(size / 1024 / 1024, 2)} MB"
+                }
+        except Exception as e:
+            result['components']['database'] = {'status': 'error', 'message': str(e)}
+            result['overall'] = 'degraded'
+
+        # ===== Bybit API =====
+        try:
+            if trading_engine and trading_engine.exchange:
+                # Перевіряємо чи є ціни
+                prices = trading_engine.exchange.current_prices
+                has_prices = len(prices) > 0
+                # Перевіряємо WebSocket
+                ws_connected = len(trading_engine.exchange.ws_connections) > 0 if hasattr(trading_engine.exchange,
+                                                                                          'ws_connections') else False
+
+                result['components']['bybit'] = {
+                    'status': 'healthy' if has_prices else 'warning',
+                    'prices_count': len(prices),
+                    'websocket': 'connected' if ws_connected else 'disconnected',
+                    'message': f"Цін: {len(prices)}, WebSocket: {'✅' if ws_connected else '❌'}"
+                }
+            else:
+                result['components']['bybit'] = {'status': 'error', 'message': 'Exchange not initialized'}
+                result['overall'] = 'degraded'
+        except Exception as e:
+            result['components']['bybit'] = {'status': 'error', 'message': str(e)}
+            result['overall'] = 'degraded'
+
+        # ===== Telegram Bot =====
+        try:
+            if trading_engine and hasattr(trading_engine, 'telegram_bot') and trading_engine.telegram_bot:
+                is_running = getattr(trading_engine.telegram_bot, '_running', False)
+                has_token = bool(trading_engine.config.TELEGRAM_BOT_TOKEN)
+
+                if has_token and is_running:
+                    result['components']['telegram'] = {'status': 'healthy', 'message': 'Бот активний'}
+                elif has_token and not is_running:
+                    result['components']['telegram'] = {'status': 'warning', 'message': 'Бот не запущено'}
+                else:
+                    result['components']['telegram'] = {'status': 'error', 'message': 'Токен відсутній'}
+                    result['overall'] = 'degraded'
+            else:
+                result['components']['telegram'] = {'status': 'error', 'message': 'Telegram бот не ініціалізовано'}
+        except Exception as e:
+            result['components']['telegram'] = {'status': 'error', 'message': str(e)}
+
+        # ===== News API =====
+        try:
+            news_strategy = None
+            for strategy in trading_engine.strategies.values():
+                if strategy.name == 'news':
+                    news_strategy = strategy
+                    break
+
+            if news_strategy:
+                api_key_configured = getattr(news_strategy, 'news_api_key', False)
+                last_news_count = getattr(news_strategy, 'articles_count', 0)
+
+                if api_key_configured:
+                    result['components']['news_api'] = {
+                        'status': 'healthy',
+                        'last_news': last_news_count,
+                        'message': f"API ключ є, останніх новин: {last_news_count}"
+                    }
+                else:
+                    result['components']['news_api'] = {'status': 'error', 'message': 'API ключ відсутній'}
+                    result['overall'] = 'degraded'
+            else:
+                result['components']['news_api'] = {'status': 'warning', 'message': 'News стратегія не знайдена'}
+        except Exception as e:
+            result['components']['news_api'] = {'status': 'error', 'message': str(e)}
+
+        # ===== WebSocket Сервер =====
+        try:
+            from web.websocket_server import connected_clients
+            clients_count = len(connected_clients) if 'connected_clients' in dir() else 0
+            result['components']['websocket'] = {
+                'status': 'healthy' if clients_count > 0 else 'warning',
+                'clients': clients_count,
+                'message': f"Клієнтів: {clients_count}"
+            }
+        except:
+            result['components']['websocket'] = {'status': 'unknown', 'message': 'Не вдалося перевірити'}
+
+        # ===== Веб-сервер =====
+        try:
+            result['components']['web_server'] = {
+                'status': 'healthy',
+                'uptime': time.time() - getattr(trading_engine, 'start_time', time.time()),
+                'message': 'Працює'
+            }
+        except:
+            result['components']['web_server'] = {'status': 'healthy', 'message': 'Працює'}
+
+        # ===== Система =====
+        try:
+            cpu = psutil.cpu_percent(interval=0.5)
+            ram = psutil.virtual_memory().percent
+            disk = psutil.disk_usage('/').percent
+
+            cpu_status = 'healthy' if cpu < 80 else ('warning' if cpu < 95 else 'error')
+            ram_status = 'healthy' if ram < 80 else ('warning' if ram < 95 else 'error')
+
+            result['components']['system'] = {
+                'status': cpu_status if cpu_status == ram_status else 'warning',
+                'cpu': round(cpu, 1),
+                'cpu_status': cpu_status,
+                'ram': round(ram, 1),
+                'ram_status': ram_status,
+                'disk': round(disk, 1),
+                'message': f"CPU: {cpu}%, RAM: {ram}%, Disk: {disk}%"
+            }
+            if cpu > 95 or ram > 95:
+                result['overall'] = 'degraded'
+        except Exception as e:
+            result['components']['system'] = {'status': 'error', 'message': str(e)}
+
+        # ===== Стратегії =====
+        strategies_status = []
+        for strategy in trading_engine.strategies.values():
+            status = await strategy.get_status()
+            strategies_status.append({
+                'name': status['name'],
+                'enabled': status['enabled'],
+                'status': 'healthy' if status['enabled'] and not status.get('is_blocked') else (
+                    'warning' if not status['enabled'] else 'error'),
+                'message': f"{'✅ Активна' if status['enabled'] else '❌ Зупинена'}"
+            })
+        result['components']['strategies'] = strategies_status
+
+        # ===== Логи (помилки за 24 години) =====
+        try:
+            from database.db import get_db
+            from datetime import datetime, timedelta
+
+            with get_db() as conn:
+                yesterday = (datetime.now() - timedelta(days=1)).isoformat()
+                errors = conn.execute(
+                    "SELECT COUNT(*) as count FROM logs WHERE level = 'ERROR' AND timestamp > ?",
+                    (yesterday,)
+                ).fetchone()
+                warnings = conn.execute(
+                    "SELECT COUNT(*) as count FROM logs WHERE level = 'WARNING' AND timestamp > ?",
+                    (yesterday,)
+                ).fetchone()
+
+                error_count = errors['count'] if errors else 0
+                warning_count = warnings['count'] if warnings else 0
+
+                log_status = 'healthy' if error_count == 0 else ('warning' if error_count < 10 else 'error')
+                result['components']['logs'] = {
+                    'status': log_status,
+                    'errors_24h': error_count,
+                    'warnings_24h': warning_count,
+                    'message': f"Помилок: {error_count}, Попереджень: {warning_count}"
+                }
+                if error_count > 0:
+                    result['overall'] = 'degraded' if error_count < 10 else 'unhealthy'
+        except Exception as e:
+            result['components']['logs'] = {'status': 'error', 'message': str(e)}
+
+        # Фінальний статус
+        if result['overall'] == 'healthy':
+            result['message'] = '✅ Всі системи працюють нормально'
+        elif result['overall'] == 'degraded':
+            result['message'] = '⚠️ Деякі системи мають проблеми'
+        else:
+            result['message'] = '🔴 Критичні проблеми!'
+
+        return jsonify(result)
+
+    @app.route('/api/health/test')
+    @async_route
+    async def api_health_test():
+        """Тестування конкретного компонента"""
+        component = request.args.get('component', 'all')
+
+        results = {}
+
+        if component == 'all' or component == 'database':
+            try:
+                from database.db import get_db
+                with get_db() as conn:
+                    conn.execute("SELECT 1")
+                results['database'] = {'status': 'ok', 'message': 'Підключення успішне'}
+            except Exception as e:
+                results['database'] = {'status': 'error', 'message': str(e)}
+
+        if component == 'all' or component == 'bybit':
+            try:
+                price = await trading_engine.exchange.get_current_price('BTCUSDT')
+                results['bybit'] = {'status': 'ok', 'message': f'BTCUSDT: ${price:.2f}'}
+            except Exception as e:
+                results['bybit'] = {'status': 'error', 'message': str(e)}
+
+        if component == 'all' or component == 'telegram':
+            try:
+                bot = trading_engine.telegram_bot
+                if bot and bot._running:
+                    results['telegram'] = {'status': 'ok', 'message': 'Бот активний'}
+                else:
+                    results['telegram'] = {'status': 'error', 'message': 'Бот не активний'}
+            except Exception as e:
+                results['telegram'] = {'status': 'error', 'message': str(e)}
+
+        if component == 'all' or component == 'websocket':
+            try:
+                from web.websocket_server import connected_clients
+                results['websocket'] = {'status': 'ok', 'message': f'Клієнтів: {len(connected_clients)}'}
+            except Exception as e:
+                results['websocket'] = {'status': 'error', 'message': str(e)}
+
+        return jsonify(results)
+
     # ============= [НОВЕ] PROMETHEUS METRICS API =============
 
     @app.route('/metrics')

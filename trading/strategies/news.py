@@ -69,6 +69,8 @@ class NewsStrategy(BaseStrategy):
         save_strategy_settings('news', enabled=True)
         self._analysis_task = asyncio.create_task(self._analysis_loop())
         logger.info("NewsStrategy: цикл аналізу запущено")
+        if self.telegram_bot:
+            await self.telegram_bot.send_strategy_status(self.name, True)
 
     async def stop(self):
         if self._analysis_task:
@@ -76,6 +78,8 @@ class NewsStrategy(BaseStrategy):
         await super().stop()
         save_strategy_settings('news', enabled=False)
         logger.info("NewsStrategy: зупинено")
+        if self.telegram_bot:
+            await self.telegram_bot.send_strategy_status(self.name, False)
 
     async def _analysis_loop(self):
         while self.enabled:

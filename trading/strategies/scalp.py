@@ -90,6 +90,8 @@ class ScalpStrategy(BaseStrategy):
         self._analysis_task = asyncio.create_task(self._analysis_loop())
         self.exchange.add_price_callback(self.on_price_update)
         logger.info("ScalpStrategy: цикл аналізу запущено")
+        if self.telegram_bot:
+            await self.telegram_bot.send_strategy_status(self.name, True)
 
     async def stop(self):
         """Зупинка стратегії"""
@@ -99,6 +101,8 @@ class ScalpStrategy(BaseStrategy):
         await super().stop()
         save_strategy_settings('scalp', enabled=False)
         logger.info("ScalpStrategy: зупинено")
+        if self.telegram_bot:
+            await self.telegram_bot.send_strategy_status(self.name, False)
 
     async def _analysis_loop(self):
         while self.enabled:

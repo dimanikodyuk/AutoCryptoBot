@@ -6,11 +6,15 @@
   "display": "standalone",
   "theme_color": "#0a0a0f",
   "background_color": "#0a0a0f",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "categories": ["finance", "productivity"],
   "icons": [
     {
       "src": "/static/icons/icon-72x72.png",
       "sizes": "72x72",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
       "src": "/static/icons/icon-96x96.png",
@@ -47,5 +51,37 @@
       "sizes": "512x512",
       "type": "image/png"
     }
-  ]
+  ],
+  "screenshots": [
+    {
+      "src": "/static/screenshots/dashboard.png",
+      "sizes": "1280x720",
+      "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Дашборд",
+      "short_name": "Дашборд",
+      "description": "Головна сторінка",
+      "url": "/",
+      "icons": [{ "src": "/static/icons/icon-96x96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Сигнали",
+      "short_name": "Сигнали",
+      "description": "Додати сигнал",
+      "url": "/#signals",
+      "icons": [{ "src": "/static/icons/icon-96x96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Стан бота",
+      "short_name": "Стан",
+      "description": "Статус стратегій",
+      "url": "/#health",
+      "icons": [{ "src": "/static/icons/icon-96x96.png", "sizes": "96x96" }]
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
 }
