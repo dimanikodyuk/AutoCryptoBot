@@ -85,6 +85,20 @@
         .btn-save { background: #00d4ff; color: #0a0a0f; }
         .btn-small { background: #ff8800; padding: 4px 8px; font-size: 12px; }
         .btn-mode { padding: 6px 12px; margin: 0 5px; }
+        .tf-btn {
+    background: transparent;
+    color: #888;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    transition: all 0.15s;
+}
+.tf-btn:hover { color: #00d4ff; background: #1a1a2e; transform: none; }
+.tf-btn.tf-active { background: #00d4ff22; color: #00d4ff; }
+.tf-btn.ind-active { background: #ff880033; color: #ff8800; }
         .orders-table {
             background: #1a1a2e;
             border-radius: 12px;
@@ -1177,10 +1191,24 @@
         }
 
         // ============= GRID З СІТКОЮ НА ГРАФІКУ =============
+
+        // ============= GRID З РОЗШИРЕНИМ ГРАФІКОМ =============
+
+// Глобальні змінні для стану Grid графіка
+let gridChartState = {
+    symbol: null,
+    tf: '15',
+    chartType: 'candle',
+    indicators: { ema: false, bb: false, vol: true, rsi: false },
+    gridData: null
+};
+
 async function showGridForSymbol(symbol) {
     document.querySelectorAll('.symbol-btn').forEach(btn => btn.classList.remove('active'));
     const activeBtn = document.getElementById(`btn_${symbol}`);
     if (activeBtn) activeBtn.classList.add('active');
+
+    gridChartState.symbol = symbol;
 
     const container = document.getElementById('gridVisualization');
     container.innerHTML = '<div class="loading">Завантаження сітки...</div>';
@@ -1193,27 +1221,21 @@ async function showGridForSymbol(symbol) {
 
         const gridData = await gridResponse.json();
         const klinesData = await klinesResponse.json();
+        gridChartState.gridData = gridData;
 
         if (!gridData.levels || gridData.levels.length === 0) {
             container.innerHTML = `<div class="loading">⚠️ Немає даних сітки для ${symbol}<br><button onclick="forceRebuildGrid('${symbol}')" style="margin-top: 10px;">🔄 Перебудувати сітку</button></div>`;
             return;
         }
 
+        // HTML для сітки (рівні)
         let html = `<div style="display: flex; justify-content: space-between; align-items: center; margin: 15px 0 10px 0;">
             <h3>📊 ${symbol} - ${gridData.current_price ? `$${gridData.current_price.toFixed(2)}` : 'N/A'}</h3>
             <div style="display: flex; gap: 10px;">
-                <select id="tf_${symbol}" onchange="updateGridChart('${symbol}')" style="background: #0f0f1a; border: 1px solid #2a2a4a; color: white; padding: 8px; border-radius: 8px;">
-                    <option value="1">1 хвилина</option>
-                    <option value="5">5 хвилин</option>
-                    <option value="15" selected>15 хвилин</option>
-                    <option value="60">1 година</option>
-                    <option value="240">4 години</option>
-                    <option value="D">День</option>
-                    <option value="W">Тиждень</option>
-                </select>
                 <button onclick="forceRebuildGrid('${symbol}')" style="background: #ff8800;">🔄 Перебудувати сітку</button>
             </div>
-        </div><div class="grid-container">`;
+        </div>
+        <div class="grid-container" style="max-height: 400px; overflow-y: auto; margin-bottom: 20px;">`;
 
         for (const level of gridData.levels) {
             let barClass = 'grid-level-neutral', priceClass = '', sideText = '';
@@ -1227,210 +1249,440 @@ async function showGridForSymbol(symbol) {
             </div></div>`;
         }
         html += `</div>`;
+
+        // Додаємо панель інструментів для графіка
+        html += `
+            <div class="chart-card" style="margin-top: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">
+                    <h3 style="margin:0;">📈 Графік ${symbol}</h3>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <!-- Таймфрейми -->
+                        <div style="display:flex; gap:4px; background:#0f0f1a; padding:4px; border-radius:8px;">
+                            <button onclick="changeGridChartTf('1')"  id="grid_tf_1"  class="tf-btn ${gridChartState.tf === '1' ? 'tf-active' : ''}">1м</button>
+                            <button onclick="changeGridChartTf('3')"  id="grid_tf_3"  class="tf-btn ${gridChartState.tf === '3' ? 'tf-active' : ''}">3м</button>
+                            <button onclick="changeGridChartTf('5')"  id="grid_tf_5"  class="tf-btn ${gridChartState.tf === '5' ? 'tf-active' : ''}">5м</button>
+                            <button onclick="changeGridChartTf('15')" id="grid_tf_15" class="tf-btn ${gridChartState.tf === '15' ? 'tf-active' : ''}">15м</button>
+                            <button onclick="changeGridChartTf('60')" id="grid_tf_60" class="tf-btn ${gridChartState.tf === '60' ? 'tf-active' : ''}">1г</button>
+                        </div>
+                        <!-- Тип графіка -->
+                        <div style="display:flex; gap:4px; background:#0f0f1a; padding:4px; border-radius:8px;">
+                            <button onclick="changeGridChartType('candle')" id="grid_ct_candle" class="tf-btn ${gridChartState.chartType === 'candle' ? 'tf-active' : ''}" title="Свічки">🕯</button>
+                            <button onclick="changeGridChartType('line')"   id="grid_ct_line"   class="tf-btn ${gridChartState.chartType === 'line' ? 'tf-active' : ''}" title="Лінія">📈</button>
+                        </div>
+                        <!-- Індикатори -->
+                        <div style="display:flex; gap:4px; background:#0f0f1a; padding:4px; border-radius:8px;">
+                            <button onclick="toggleGridIndicator('ema')" id="grid_ind_ema" class="tf-btn ${gridChartState.indicators.ema ? 'ind-active' : ''}" title="EMA 9/21">EMA</button>
+                            <button onclick="toggleGridIndicator('bb')"  id="grid_ind_bb"  class="tf-btn ${gridChartState.indicators.bb ? 'ind-active' : ''}" title="Bollinger Bands">BB</button>
+                            <button onclick="toggleGridIndicator('vol')" id="grid_ind_vol" class="tf-btn ${gridChartState.indicators.vol ? 'ind-active' : ''}" title="Об'єм">VOL</button>
+                            <button onclick="toggleGridIndicator('rsi')" id="grid_ind_rsi" class="tf-btn ${gridChartState.indicators.rsi ? 'ind-active' : ''}" title="RSI">RSI</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="gridChartContainer" style="height: 450px;"></div>
+                <div id="gridRsiContainer" style="display:none; margin-top: 5px;">
+                    <div id="gridRsiChart" style="width:100%; height:120px;"></div>
+                </div>
+            </div>
+        `;
+
         container.innerHTML = html;
 
-        // Зберігаємо дані сітки для використання в графіку
-        window.currentGridData = gridData;
+        // Малюємо графік
+        await drawGridChart(klinesData);
 
-        // Малюємо графік з сіткою
-        await drawCandlestickChartWithGrid(symbol, klinesData, gridData);
     } catch(e) {
         console.error('Помилка showGridForSymbol:', e);
         container.innerHTML = `<div class="loading">❌ Помилка завантаження: ${e.message}</div>`;
     }
 }
-        async function drawCandlestickChartWithGrid(symbol, klinesData, gridData) {
-    if (!klinesData || klinesData.length === 0) return;
 
-    klinesData.sort((a, b) => a.timestamp - b.timestamp);
-    const timestamps = klinesData.map(k => new Date(k.timestamp).toLocaleString());
-    const open = klinesData.map(k => k.open);
-    const high = klinesData.map(k => k.high);
-    const low = klinesData.map(k => k.low);
-    const close = klinesData.map(k => k.close);
-    const volume = klinesData.map(k => k.volume);
-
-    const container = document.getElementById('gridVisualization');
-    const chartId = `candlestick_${symbol}`;
-    let chartDiv = document.getElementById(chartId);
-
-    if (!chartDiv) {
-        const chartHtml = `<div class="chart-card" style="margin-top:20px;"><h3>📊 Графік ${symbol}</h3><div id="${chartId}" style="height: 450px;"></div></div>`;
-        container.insertAdjacentHTML('beforeend', chartHtml);
-        chartDiv = document.getElementById(chartId);
+async function drawGridChart(klinesData) {
+    if (!klinesData || klinesData.length === 0) {
+        console.warn('Немає даних свічок');
+        return;
     }
 
-    if (chartDiv) {
-        // Свічковий графік
-        const candlestick = {
-            x: timestamps, open, high, low, close,
-            type: 'candlestick',
-            name: 'Ціна',
-            increasing: { line: { color: '#00ff88' } },
-            decreasing: { line: { color: '#ff4444' } }
-        };
+    const { symbol, chartType, indicators, gridData } = gridChartState;
 
-        // Об'єм
-        const volumeTrace = {
-            x: timestamps, y: volume, type: 'bar', name: 'Об\'єм',
-            marker: { color: '#00d4ff', opacity: 0.5 }, yaxis: 'y2'
-        };
+    // Сортуємо за timestamp
+    klinesData.sort((a, b) => a.timestamp - b.timestamp);
 
-        const traces = [candlestick, volumeTrace];
+    // Перевіряємо, чи є дані
+    if (klinesData.length === 0) {
+        console.warn('Порожні дані свічок');
+        return;
+    }
 
-        // Додаємо лінії рівнів сітки на графік
-        const shapes = [];
-        const annotations = [];
+    // Форматуємо дати правильно
+    const dates = klinesData.map(k => {
+        const d = new Date(k.timestamp);
+        return d.toLocaleString('uk-UA', {
+            hour: '2-digit',
+            minute: '2-digit',
+            day: '2-digit',
+            month: '2-digit'
+        });
+    });
 
-        if (gridData && gridData.levels && gridData.levels.length > 0) {
-            // Поточна ціна
-            if (gridData.current_price) {
-                shapes.push({
-                    type: 'line',
-                    x0: 0, x1: 1, xref: 'paper',
-                    y0: gridData.current_price, y1: gridData.current_price, yref: 'y',
-                    line: { color: '#00d4ff', width: 2, dash: 'solid' }
-                });
-                annotations.push({
-                    x: 1, y: gridData.current_price, xref: 'paper', yref: 'y',
-                    text: `💰 ${gridData.current_price.toFixed(2)}`,
-                    showarrow: false, xanchor: 'right',
-                    font: { color: '#00d4ff', size: 10 }
-                });
-            }
+    const opens = klinesData.map(k => parseFloat(k.open));
+    const highs = klinesData.map(k => parseFloat(k.high));
+    const lows = klinesData.map(k => parseFloat(k.low));
+    const closes = klinesData.map(k => parseFloat(k.close));
+    const volumes = klinesData.map(k => parseFloat(k.volume));
 
-            // Рівні сітки
-            for (const level of gridData.levels) {
-                let lineColor = '#888';
-                let lineWidth = 1;
-                let dash = 'dash';
-                let prefix = '';
+    // Отримуємо поточну ціну з останньої свічки
+    const lastPrice = closes[closes.length - 1];
+    const minPrice = Math.min(...lows);
+    const maxPrice = Math.max(...highs);
 
-                if (level.type === 'buy') { lineColor = '#00ff88'; prefix = '🟢 '; }
-                else if (level.type === 'sell') { lineColor = '#ff4444'; prefix = '🔴 '; }
-                else if (level.type === 'active_buy') { lineColor = '#00ff88'; lineWidth = 2; dash = 'solid'; prefix = '✅ '; }
-                else if (level.type === 'active_sell') { lineColor = '#ff4444'; lineWidth = 2; dash = 'solid'; prefix = '❌ '; }
-                else if (level.type === 'neutral') { lineColor = '#00d4ff'; lineWidth = 2; dash = 'solid'; prefix = '⚪ '; }
-                else { continue; }
+    console.log('Дані графіка:', {
+        symbol,
+        datesCount: dates.length,
+        priceRange: [minPrice, maxPrice],
+        lastPrice,
+        levelsCount: gridData?.levels?.length || 0
+    });
 
-                shapes.push({
-                    type: 'line',
-                    x0: 0, x1: 1, xref: 'paper',
-                    y0: level.price, y1: level.price, yref: 'y',
-                    line: { color: lineColor, width: lineWidth, dash: dash }
-                });
+    const traces = [];
 
-                // Додаємо підпис для активних рівнів
-                if (level.type === 'active_buy' || level.type === 'active_sell' || level.type === 'neutral') {
-                    annotations.push({
-                        x: 0, y: level.price, xref: 'paper', yref: 'y',
-                        text: `${prefix}${level.price.toFixed(2)}`,
-                        showarrow: false, xanchor: 'left',
-                        font: { color: lineColor, size: 9 }
-                    });
-                }
-            }
+    // 1. Основний графік (свічки)
+    traces.push({
+        type: 'candlestick',
+        x: dates,
+        open: opens,
+        high: highs,
+        low: lows,
+        close: closes,
+        name: `${symbol}`,
+        increasing: { line: { color: '#00ff88', width: 1 }, fillcolor: '#00ff8844' },
+        decreasing: { line: { color: '#ff4444', width: 1 }, fillcolor: '#ff444444' },
+        whiskerwidth: 0.5,
+        line: { width: 1 },
+        yaxis: 'y'
+    });
+
+    // 2. Об'єм (окрема вісь y2)
+    if (indicators.vol) {
+        const volColors = closes.map((c, i) => i > 0 ? (c >= opens[i] ? 'rgba(0,255,136,0.4)' : 'rgba(255,68,68,0.4)') : 'rgba(0,212,255,0.4)');
+        traces.push({
+            type: 'bar',
+            x: dates,
+            y: volumes,
+            name: 'Об\'єм',
+            marker: { color: volColors },
+            yaxis: 'y2',
+            opacity: 0.7
+        });
+    }
+
+    // 3. Лінії Grid сітки - ТІЛЬКИ якщо вони в межах видимого діапазону
+    const shapes = [];
+    const annotations = [];
+
+    if (gridData && gridData.levels && gridData.levels.length > 0) {
+        // Фільтруємо рівні, що в межах діапазону ±20%
+        const visibleLevels = gridData.levels.filter(level => {
+            return level.price >= minPrice * 0.8 && level.price <= maxPrice * 1.2;
+        });
+
+        console.log('Видимі рівні сітки:', visibleLevels.length, 'з', gridData.levels.length);
+
+        // Поточна ціна
+        if (lastPrice) {
+            shapes.push({
+                type: 'line', x0: 0, x1: 1, xref: 'paper',
+                y0: lastPrice, y1: lastPrice, yref: 'y',
+                line: { color: '#00d4ff', width: 2, dash: 'solid' }
+            });
+            annotations.push({
+                x: 1, y: lastPrice, xref: 'paper', yref: 'y',
+                text: `💰 CURRENT $${lastPrice.toFixed(2)}`,
+                showarrow: false, xanchor: 'right',
+                font: { color: '#00d4ff', size: 11, weight: 'bold' },
+                bgcolor: 'rgba(0,0,0,0.6)',
+                bordercolor: '#00d4ff',
+                borderwidth: 1,
+                borderpad: 3
+            });
         }
 
-        const layout = {
-            title: { text: `📊 ${symbol} - Grid рівні`, font: { color: '#e0e0e0', size: 14 } },
-            paper_bgcolor: '#1a1a2e',
-            plot_bgcolor: '#1a1a2e',
-            font: { color: '#e0e0e0' },
-            xaxis: { title: 'Час', gridcolor: '#2a2a4a', tickangle: -45, type: 'category' },
-            yaxis: { title: 'Ціна (USDT)', gridcolor: '#2a2a4a', side: 'left' },
-            yaxis2: { title: 'Об\'єм', gridcolor: '#2a2a4a', overlaying: 'y', side: 'right' },
-            hovermode: 'x',
-            margin: { l: 70, r: 70, t: 50, b: 80 },
-            legend: { orientation: 'h', y: 1.1, x: 0, bgcolor: 'rgba(0,0,0,0)' },
-            dragmode: 'zoom',
-            shapes: shapes,
-            annotations: annotations
-        };
+        // Додаємо рівні сітки
+        for (const level of visibleLevels) {
+            let lineColor = '#888';
+            let lineWidth = 1.5;
+            let dash = 'dash';
+            let prefix = '';
 
-        Plotly.purge(chartDiv);
-        Plotly.newPlot(chartDiv, traces, layout, { responsive: true });
+            if (level.type === 'buy') {
+                lineColor = '#00ff88';
+                prefix = '🟢 BUY ';
+            } else if (level.type === 'sell') {
+                lineColor = '#ff4444';
+                prefix = '🔴 SELL ';
+            } else if (level.type === 'active_buy') {
+                lineColor = '#00ff88';
+                lineWidth = 3;
+                dash = 'solid';
+                prefix = '✅ ACTIVE BUY ';
+            } else if (level.type === 'active_sell') {
+                lineColor = '#ff4444';
+                lineWidth = 3;
+                dash = 'solid';
+                prefix = '❌ ACTIVE SELL ';
+            } else if (level.type === 'neutral') {
+                lineColor = '#00d4ff';
+                lineWidth = 1;
+                dash = 'dot';
+                prefix = '⚪ LEVEL ';
+            } else {
+                continue;
+            }
+
+            shapes.push({
+                type: 'line',
+                x0: 0, x1: 1, xref: 'paper',
+                y0: level.price, y1: level.price, yref: 'y',
+                line: { color: lineColor, width: lineWidth, dash: dash }
+            });
+
+            annotations.push({
+                x: 0, y: level.price, xref: 'paper', yref: 'y',
+                text: `${prefix}$${level.price.toFixed(2)}`,
+                showarrow: false, xanchor: 'left',
+                font: { color: lineColor, size: 10, weight: 'bold' },
+                bgcolor: 'rgba(0,0,0,0.5)',
+                bordercolor: lineColor,
+                borderwidth: 1,
+                borderpad: 2
+            });
+        }
     }
-}
-        // Функція для оновлення графіка при зміні таймфрейму
-        async function updateGridChart(symbol) {
-    const interval = document.getElementById(`tf_${symbol}`)?.value || '15';
-    let limit = 200;
-    switch(interval) {
-        case '1': limit = 200; break;
-        case '5': limit = 200; break;
-        case '15': limit = 200; break;
-        case '60': limit = 150; break;
-        case '240': limit = 120; break;
-        case 'D': limit = 90; break;
-        case 'W': limit = 52; break;
-        default: limit = 200;
-    }
-    try {
-        const [klinesResponse, gridResponse] = await Promise.all([
-            fetch(`/api/klines/${symbol}?interval=${interval}&limit=${limit}`),
-            fetch(`/api/grid_levels/${symbol}`)
-        ]);
-        const klinesData = await klinesResponse.json();
-        const gridData = await gridResponse.json();
-        window.currentGridData = gridData;
-        await drawCandlestickChartWithGrid(symbol, klinesData, gridData);
-    } catch(e) {
-        console.error('Помилка оновлення графіка:', e);
-    }
-}
 
+    // Визначаємо діапазон Y
+    let yMin = minPrice;
+    let yMax = maxPrice;
 
-        async function addCandlestickChart(symbol, klinesData, updateOnly = false) {
-    const container = document.getElementById('gridVisualization');
-    if (!klinesData || klinesData.length === 0) return;
+    // Додаємо відступи 5% зверху і знизу
+    const padding = (yMax - yMin) * 0.05;
+    yMin = yMin - padding;
+    yMax = yMax + padding;
 
-    klinesData.sort((a, b) => a.timestamp - b.timestamp);
-    const timestamps = klinesData.map(k => new Date(k.timestamp).toLocaleString());
-    const open = klinesData.map(k => k.open);
-    const high = klinesData.map(k => k.high);
-    const low = klinesData.map(k => k.low);
-    const close = klinesData.map(k => k.close);
-    const volume = klinesData.map(k => k.volume);
-
-    const candlestick = {
-        x: timestamps,
-        open: open, high: high, low: low, close: close,
-        type: 'candlestick',
-        name: 'Ціна',
-        increasing: { line: { color: '#00ff88' } },
-        decreasing: { line: { color: '#ff4444' } }
-    };
-
-    const volumeTrace = {
-        x: timestamps, y: volume, type: 'bar', name: 'Об\'єм',
-        marker: { color: '#00d4ff', opacity: 0.5 }, yaxis: 'y2'
-    };
+    const hasVol = indicators.vol;
 
     const layout = {
-        paper_bgcolor: '#1a1a2e', plot_bgcolor: '#1a1a2e', font: { color: '#e0e0e0' },
-        xaxis: { title: 'Час', gridcolor: '#2a2a4a', tickangle: -45, type: 'category' },
-        yaxis: { title: 'Ціна (USDT)', gridcolor: '#2a2a4a', side: 'left' },
-        yaxis2: { title: 'Об\'єм', gridcolor: '#2a2a4a', overlaying: 'y', side: 'right' },
-        hovermode: 'x', margin: { l: 60, r: 60, t: 30, b: 80 },
-        legend: { orientation: 'h', y: 1.1, x: 0, bgcolor: 'rgba(0,0,0,0)' },
-        dragmode: 'zoom'
+        paper_bgcolor: '#0f0f1a',
+        plot_bgcolor: '#0f0f1a',
+        font: { color: '#e0e0e0', size: 11 },
+        margin: { l: 70, r: 120, t: 50, b: 80 },
+        height: 500,
+        hovermode: 'x unified',
+        dragmode: 'zoom',
+        xaxis: {
+            title: 'Час',
+            gridcolor: '#2a2a4a',
+            tickangle: -45,
+            type: 'category',
+            color: '#888',
+            tickfont: { size: 10 }
+        },
+        yaxis: {
+            title: `${symbol} (USDT)`,
+            gridcolor: '#2a2a4a',
+            range: [yMin, yMax],
+            color: '#888',
+            tickprefix: '$',
+            side: 'right',
+            tickfont: { size: 10 },
+            tickformat: ',.0f'
+        },
+        yaxis2: hasVol ? {
+            title: 'Об\'єм',
+            gridcolor: '#2a2a4a',
+            color: '#888',
+            side: 'left',
+            showticklabels: true,
+            tickfont: { size: 9 },
+            overlaying: 'y',
+            position: 0
+        } : { visible: false },
+        legend: {
+            bgcolor: 'rgba(15,15,26,0.9)',
+            bordercolor: '#2a2a4a',
+            borderwidth: 1,
+            x: 0.02,
+            y: 0.98,
+            font: { size: 10 }
+        },
+        shapes: shapes,
+        annotations: annotations,
+        title: {
+            text: `📊 ${symbol} - Grid Trading (${gridData?.levels?.length || 0} levels)`,
+            font: { color: '#e0e0e0', size: 14 },
+            x: 0.5,
+            xref: 'paper'
+        }
     };
 
-    const chartId = `candlestick_${symbol}`;
-    let chartDiv = document.getElementById(chartId);
-
-    if (!chartDiv && !updateOnly) {
-        const chartHtml = `<div class="chart-card" style="margin-top:20px;"><h3>📊 Графік ${symbol}</h3><div id="${chartId}" style="height: 450px;"></div></div>`;
-        container.insertAdjacentHTML('beforeend', chartHtml);
-        chartDiv = document.getElementById(chartId);
-    }
-
+    const chartDiv = document.getElementById('gridChartContainer');
     if (chartDiv) {
-        Plotly.purge(chartDiv);
-        Plotly.newPlot(chartDiv, [candlestick, volumeTrace], layout, { responsive: true });
+        try {
+            Plotly.purge(chartDiv);
+            Plotly.newPlot(chartDiv, traces, layout, {
+                responsive: true,
+                displayModeBar: true,
+                scrollZoom: true
+            });
+            console.log('Графік успішно відмальовано');
+        } catch(e) {
+            console.error('Помилка малювання графіка:', e);
+            chartDiv.innerHTML = `<div class="loading">❌ Помилка відображення графіка: ${e.message}</div>`;
+        }
     }
 }
+
+// Допоміжні функції для індикаторів
+function calcEMA(prices, period) {
+    if (prices.length < period) return Array(prices.length).fill(null);
+    const k = 2 / (period + 1);
+    const result = Array(prices.length).fill(null);
+    let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    result[period - 1] = ema;
+    for (let i = period; i < prices.length; i++) {
+        ema = prices[i] * k + ema * (1 - k);
+        result[i] = ema;
+    }
+    return result;
+}
+
+function calcRSI(prices, period = 14) {
+    const result = Array(prices.length).fill(null);
+    if (prices.length < period + 1) return result;
+    let gains = 0, losses = 0;
+    for (let i = 1; i <= period; i++) {
+        const d = prices[i] - prices[i-1];
+        if (d > 0) gains += d; else losses -= d;
+    }
+    let avgGain = gains / period, avgLoss = losses / period;
+    result[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    for (let i = period + 1; i < prices.length; i++) {
+        const d = prices[i] - prices[i-1];
+        const g = d > 0 ? d : 0, l = d < 0 ? -d : 0;
+        avgGain = (avgGain * (period - 1) + g) / period;
+        avgLoss = (avgLoss * (period - 1) + l) / period;
+        result[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    }
+    return result;
+}
+
+function calcBB(prices, period = 20, mult = 2) {
+    const upper = [], middle = [], lower = [];
+    for (let i = 0; i < prices.length; i++) {
+        if (i < period - 1) { upper.push(null); middle.push(null); lower.push(null); continue; }
+        const slice = prices.slice(i - period + 1, i + 1);
+        const mean = slice.reduce((a, b) => a + b, 0) / period;
+        const std = Math.sqrt(slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period);
+        upper.push(mean + mult * std);
+        middle.push(mean);
+        lower.push(mean - mult * std);
+    }
+    return { upper, middle, lower };
+}
+
+// Функції для керування графіком
+async function changeGridChartTf(tf) {
+    gridChartState.tf = tf;
+
+    // Оновлюємо активний стан кнопок
+    ['1', '3', '5', '15', '60'].forEach(t => {
+        const btn = document.getElementById(`grid_tf_${t}`);
+        if (btn) btn.classList.toggle('tf-active', t === tf);
+    });
+
+    const symbol = gridChartState.symbol;
+
+    // Встановлюємо ліміт залежно від таймфрейму
+    let limit = 100;
+    switch(tf) {
+        case '1': limit = 100; break;
+        case '3': limit = 100; break;
+        case '5': limit = 100; break;
+        case '15': limit = 100; break;
+        case '60': limit = 72; break;
+        default: limit = 100;
+    }
+
+    try {
+        // Показуємо завантаження
+        const chartContainer = document.getElementById('gridChartContainer');
+        if (chartContainer) {
+            chartContainer.innerHTML = '<div class="loading">⏳ Завантаження даних...</div>';
+        }
+
+        const response = await fetch(`/api/klines/${symbol}?interval=${tf}&limit=${limit}`);
+        const klinesData = await response.json();
+
+        if (!klinesData || klinesData.length === 0) {
+            throw new Error('Немає даних для цього таймфрейму');
+        }
+
+        await drawGridChart(klinesData);
+    } catch(e) {
+        console.error('Помилка зміни таймфрейму:', e);
+        const chartContainer = document.getElementById('gridChartContainer');
+        if (chartContainer) {
+            chartContainer.innerHTML = `<div class="loading">❌ Помилка: ${e.message}</div>`;
+        }
+    }
+}
+
+function changeGridChartType(type) {
+    gridChartState.chartType = type;
+    document.getElementById('grid_ct_candle')?.classList.toggle('tf-active', type === 'candle');
+    document.getElementById('grid_ct_line')?.classList.toggle('tf-active', type === 'line');
+
+    // Перемальовуємо з тими ж даними
+    const symbol = gridChartState.symbol;
+    const tf = gridChartState.tf;
+    const limit = tf === '1' ? 200 : (tf === '3' ? 200 : (tf === '5' ? 200 : (tf === '15' ? 200 : 150)));
+    fetch(`/api/klines/${symbol}?interval=${tf}&limit=${limit}`)
+        .then(r => r.json())
+        .then(data => drawGridChart(data))
+        .catch(console.error);
+}
+
+async function toggleGridIndicator(name) {
+    gridChartState.indicators[name] = !gridChartState.indicators[name];
+    const btn = document.getElementById(`grid_ind_${name}`);
+    if (btn) btn.classList.toggle('ind-active', gridChartState.indicators[name]);
+
+    // Перемальовуємо
+    const symbol = gridChartState.symbol;
+    const tf = gridChartState.tf;
+    const limit = tf === '1' ? 200 : (tf === '3' ? 200 : (tf === '5' ? 200 : (tf === '15' ? 200 : 150)));
+    try {
+        const response = await fetch(`/api/klines/${symbol}?interval=${tf}&limit=${limit}`);
+        const klinesData = await response.json();
+        await drawGridChart(klinesData);
+    } catch(e) {
+        console.error('Помилка оновлення індикатора:', e);
+    }
+}
+
+function showPriceLevelChart(symbol, price) {
+    // Прокручуємо до графіка і підсвічуємо рівень
+    const chartDiv = document.getElementById('gridChartContainer');
+    if (chartDiv) {
+        chartDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        chartDiv.style.transition = 'box-shadow 0.3s';
+        chartDiv.style.boxShadow = '0 0 20px #00d4ff';
+        setTimeout(() => {
+            chartDiv.style.boxShadow = '';
+        }, 2000);
+    }
+    alert(`📊 Рівень ${symbol}: $${price.toFixed(4)}`);
+}
+
+
 
         function showPriceLevelChart(symbol, price) {
     // Прокручуємо до графіка і підсвічуємо рівень

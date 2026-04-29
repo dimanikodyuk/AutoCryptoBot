@@ -176,8 +176,9 @@ def create_flask_app(config, trading_engine):
                 col_info = conn.execute("PRAGMA table_info(orders)").fetchall()
                 has_closed_price = any(c[1] == 'closed_price' for c in col_info)
 
-                # Якщо є збережені свічки - використовуємо їх
-                if saved_klines and len(saved_klines) > 0:
+                # Якщо є збережені свічки - використовуємо їх (тільки для tf=1, інакше йдемо в Bybit)
+                tf_param = request.args.get('tf', '1')
+                if saved_klines and len(saved_klines) > 0 and tf_param == '1':
                     logger.info(f"Використовуємо збережені свічки для угоди {order_id}: {len(saved_klines)}")
 
                     # Формуємо точки входу/виходу
@@ -293,6 +294,14 @@ def create_flask_app(config, trading_engine):
                 # Отримуємо свічки з Bybit
                 from datetime import datetime, timezone
 
+                # Таймфрейм з query param (для перемикача на фронтенді)
+                tf = request.args.get('tf', '1')
+                valid_tfs = {'1', '3', '5', '15', '30', '60', '120', '240', 'D'}
+                if tf not in valid_tfs:
+                    tf = '1'
+                tf_minutes = {'1': 1, '3': 3, '5': 5, '15': 15, '30': 30,
+                              '60': 60, '120': 120, '240': 240, 'D': 1440}.get(tf, 1)
+
                 def parse_dt(ts_str):
                     if not ts_str:
                         return None
@@ -310,19 +319,20 @@ def create_flask_app(config, trading_engine):
 
                 exit_dt = parse_dt(exit_point['timestamp']) if exit_point else None
 
-                BEFORE_SECS = 30 * 60
-                AFTER_SECS = 30 * 60
+                # Вікно: 30 свічок до входу і 30 після виходу
+                BEFORE_SECS = 30 * tf_minutes * 60
+                AFTER_SECS  = 30 * tf_minutes * 60
 
                 start_ts_ms = int((entry_dt.timestamp() - BEFORE_SECS) * 1000)
                 if exit_dt:
                     end_ts_ms = int((exit_dt.timestamp() + AFTER_SECS) * 1000)
                 else:
-                    end_ts_ms = int((entry_dt.timestamp() + 2 * 3600) * 1000)
+                    end_ts_ms = int((entry_dt.timestamp() + 2 * tf_minutes * 3600 / 60) * 1000)
 
-                duration_min = (end_ts_ms - start_ts_ms) // 60000
-                needed = min(max(duration_min + 20, 100), 1000)
+                duration_candles = (end_ts_ms - start_ts_ms) // (tf_minutes * 60000)
+                needed = min(max(duration_candles + 20, 100), 1000)
 
-                klines_raw = await trading_engine.exchange.get_klines(symbol, '1', limit=needed)
+                klines_raw = await trading_engine.exchange.get_klines(symbol, tf, limit=needed)
                 klines_raw.sort(key=lambda k: k['timestamp'])
 
                 filtered_klines = [
