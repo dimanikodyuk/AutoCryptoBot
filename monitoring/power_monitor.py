@@ -69,6 +69,7 @@ class PowerMonitor:
         self.start_time = time.time()
         self.task = asyncio.create_task(self._monitor_loop())
         logger.info(f"🔌 Моніторинг електроенергії запущено (сесія: {self.session_id})")
+        logger.info(f"⏱️ Початковий час: {datetime.now().isoformat()}")
 
     async def stop(self):
         """Зупинка моніторингу"""
@@ -91,14 +92,18 @@ class PowerMonitor:
 
     async def _monitor_loop(self):
         """Основний цикл моніторингу"""
-        last_record_time = 0
-        last_aggregate_time = 0
+        logger.info("🟢 _monitor_loop запущено")
+
+        last_record_time = time.time()
+        last_aggregate_time = time.time()
 
         # Початкові значення для розрахунку енергії
-        last_power = 0
+        last_power = self._calculate_current_power()
         last_time = time.time()
         total_energy = 0
         total_cost = 0
+
+        logger.info(f"Початкова потужність: {last_power:.2f} W")
 
         while self.running:
             try:
@@ -117,11 +122,13 @@ class PowerMonitor:
                     total_energy += energy_kwh
                     total_cost += cost_uah
 
+                    logger.debug(f"delta={delta_hours:.4f}год, енергія={energy_kwh:.8f}кВт⋅год")
+
                 last_power = power_watts
                 last_time = current_time
 
-                # Зберігаємо запис кожну годину
-                if current_time - last_record_time >= 3600:
+                # Зберігаємо запис КОЖНУ ХВИЛИНУ для тесту (потім повернемо на 1 годину)
+                if current_time - last_record_time >= 60:  # Тимчасово 1 хвилина
                     timestamp = datetime.now()
                     cpu_percent = psutil.cpu_percent()
                     ram_percent = psutil.virtual_memory().percent
@@ -136,21 +143,26 @@ class PowerMonitor:
                         session_id=self.session_id
                     )
 
-                    logger.info(f"📊 Запис споживання: {total_energy:.4f} кВт⋅год, {total_cost:.2f} грн")
+                    logger.info(f"📊 Запис споживання: потужність={power_watts:.2f}W, "
+                                f"енергія={total_energy:.4f}кВт⋅год, витрати={total_cost:.2f}грн")
                     last_record_time = current_time
 
                 # Оновлюємо денні агрегати щогодини
                 if current_time - last_aggregate_time >= 3600:
                     update_daily_aggregates()
                     last_aggregate_time = current_time
+                    logger.info("🔄 Оновлено денні агрегати")
 
-                await asyncio.sleep(60)  # Перевірка кожну хвилину
+                await asyncio.sleep(10)  # Перевірка кожні 10 секунд (для тесту)
 
             except asyncio.CancelledError:
+                logger.info("⏹️ _monitor_loop скасовано")
                 break
             except Exception as e:
-                logger.error(f"Помилка моніторингу: {e}")
-                await asyncio.sleep(60)
+                logger.error(f"❌ Помилка в _monitor_loop: {e}")
+                import traceback
+                traceback.print_exc()
+                await asyncio.sleep(30)
 
     def _calculate_current_power(self) -> float:
         """Розрахунок поточної споживаної потужності на основі навантаження CPU/RAM"""
@@ -178,31 +190,79 @@ class PowerMonitor:
 
     async def get_current_stats(self) -> Dict:
         """Отримання поточної статистики"""
-        uptime_seconds = int(time.time() - self.start_time) if self.start_time else 0
-        current_power = self._calculate_current_power()
+        try:
+            uptime_seconds = int(time.time() - self.start_time) if self.start_time else 0
+            current_power = self._calculate_current_power()
 
-        # Розраховуємо енергію за поточну сесію на основі uptime
-        session_energy_kwh = (current_power * uptime_seconds / 3600) / 1000
-        session_cost_uah = session_energy_kwh * self.price_per_kwh
+            # Якщо монітор не запущений, повертаємо дані на основі uptime
+            if not self.running or not self.start_time:
+                return {
+                    'current_power_watts': round(current_power, 2),
+                    'uptime_seconds': 0,
+                    'uptime_hours': 0,
+                    'session_id': None,
+                    'session_energy_kwh': 0,
+                    'session_cost_uah': 0,
+                    'total_energy_kwh': 0,
+                    'total_cost_uah': 0,
+                    'total_hours': 0,
+                    'month_energy_kwh': 0,
+                    'month_cost_uah': 0,
+                    'year_energy_kwh': 0,
+                    'year_cost_uah': 0
+                }
 
-        # Отримуємо загальну статистику
-        summary = get_power_summary()
+            # Розраховуємо енергію за поточну сесію
+            session_energy_kwh = (current_power * uptime_seconds / 3600) / 1000
+            session_cost_uah = session_energy_kwh * self.price_per_kwh
 
-        return {
-            'current_power_watts': round(current_power, 2),
-            'uptime_seconds': uptime_seconds,
-            'uptime_hours': round(uptime_seconds / 3600, 2),
-            'session_id': self.session_id,
-            'session_energy_kwh': round(session_energy_kwh, 4),
-            'session_cost_uah': round(session_cost_uah, 2),
-            'total_energy_kwh': summary['total_energy_kwh'],
-            'total_cost_uah': summary['total_cost_uah'],
-            'total_hours': summary['total_hours'],
-            'month_energy_kwh': summary['month_energy_kwh'],
-            'month_cost_uah': summary['month_cost_uah'],
-            'year_energy_kwh': summary['year_energy_kwh'],
-            'year_cost_uah': summary['year_cost_uah']
-        }
+            # Отримуємо дані з БД
+            try:
+                summary = get_power_summary()
+            except Exception as e:
+                logger.error(f"Помилка отримання summary: {e}")
+                summary = {
+                    'total_energy_kwh': session_energy_kwh,
+                    'total_cost_uah': session_cost_uah,
+                    'total_hours': uptime_seconds / 3600,
+                    'month_energy_kwh': session_energy_kwh * 30,
+                    'month_cost_uah': session_cost_uah * 30,
+                    'year_energy_kwh': session_energy_kwh * 365,
+                    'year_cost_uah': session_cost_uah * 365
+                }
+
+            return {
+                'current_power_watts': round(current_power, 2),
+                'uptime_seconds': uptime_seconds,
+                'uptime_hours': round(uptime_seconds / 3600, 2),
+                'session_id': self.session_id,
+                'session_energy_kwh': round(session_energy_kwh, 4),
+                'session_cost_uah': round(session_cost_uah, 2),
+                'total_energy_kwh': round(summary.get('total_energy_kwh', session_energy_kwh), 2),
+                'total_cost_uah': round(summary.get('total_cost_uah', session_cost_uah), 2),
+                'total_hours': round(summary.get('total_hours', uptime_seconds / 3600), 2),
+                'month_energy_kwh': round(summary.get('month_energy_kwh', session_energy_kwh * 30), 2),
+                'month_cost_uah': round(summary.get('month_cost_uah', session_cost_uah * 30), 2),
+                'year_energy_kwh': round(summary.get('year_energy_kwh', session_energy_kwh * 365), 2),
+                'year_cost_uah': round(summary.get('year_cost_uah', session_cost_uah * 365), 2)
+            }
+        except Exception as e:
+            logger.error(f"Помилка get_current_stats: {e}")
+            return {
+                'current_power_watts': 0,
+                'uptime_seconds': 0,
+                'uptime_hours': 0,
+                'session_id': None,
+                'session_energy_kwh': 0,
+                'session_cost_uah': 0,
+                'total_energy_kwh': 0,
+                'total_cost_uah': 0,
+                'total_hours': 0,
+                'month_energy_kwh': 0,
+                'month_cost_uah': 0,
+                'year_energy_kwh': 0,
+                'year_cost_uah': 0
+            }
 
 
 # Глобальний екземпляр
