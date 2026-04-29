@@ -202,6 +202,29 @@ def init_db():
             )
         ''')
 
+        # Таблиця технічного аналізу
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS forecasts(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            signal_type TEXT NOT NULL,
+            entry_price REAL NOT NULL,
+            target_price REAL NOT NULL,
+            confidence REAL NOT NULL,
+            explanation TEXT,
+            status TEXT DEFAULT 'active',
+            success INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP,
+            resolved_at TIMESTAMP,
+            resolved_price REAL
+        );
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_forecasts_strategy ON forecasts(strategy)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_forecasts_status ON forecasts(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_forecasts_created ON forecasts(created_at)')
+
         # Додавання стратегій за замовчуванням
         cursor.execute("SELECT COUNT(*) FROM strategies")
         if cursor.fetchone()[0] == 0:

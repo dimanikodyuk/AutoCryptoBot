@@ -18,12 +18,16 @@ class TradingEngine:
 
     def __init__(self, config: Config):
         self.config = config
+        self.db = None  # Додайте цей рядок
         self.exchange = None
         self.strategies: Dict[int, object] = {}
         self.active_strategies: List[object] = []
         self.start_time = None
 
     async def init(self):
+        # Ініціалізація БД
+        from database.db import get_db
+        self.db = get_db()
         """Ініціалізація"""
         logger.info("Ініціалізація торгового двигуна...")
         self.start_time = time.time()
@@ -102,6 +106,57 @@ class TradingEngine:
         await self.exchange.start_websocket(self.config.SYMBOLS)
 
         logger.info(f"Торговий двигун ініціалізовано. Знайдено {len(self.strategies)} стратегій")
+
+    async def get_klines(self, symbol: str, interval: str, limit: int = 100) -> list:
+        """Отримання свічок для аналізу"""
+        try:
+            # Тут має бути реальний запит до Bybit API
+            # Для прикладу використовуємо існуючий метод або створюємо новий
+            if hasattr(self, 'bybit_client'):
+                klines = await self.bybit_client.get_kline(
+                    category="spot",
+                    symbol=symbol,
+                    interval=interval,
+                    limit=limit
+                )
+                return klines.get('list', [])
+            return []
+        except Exception as e:
+            logger.error(f"Помилка отримання свічок для {symbol}: {e}")
+            return []
+
+    def get_db(self):
+        """Повертає об'єкт бази даних"""
+        return self.db
+
+    async def execute_trade(self, strategy: str, symbol: str, side: str,
+                            price: float, quantity: float, order_type: str = "market"):
+        """Виконання угоди (віртуальне або реальне)"""
+        try:
+            # Перевіряємо режим
+            mode = self.get_mode()
+
+            if mode == "real":
+                # Реальне виконання через Bybit
+                if hasattr(self, 'bybit_client'):
+                    order = await self.bybit_client.place_order(
+                        category="spot",
+                        symbol=symbol,
+                        side=side.capitalize(),
+                        orderType=order_type.upper(),
+                        qty=str(quantity),
+                        price=str(price) if order_type == "limit" else None
+                    )
+                    logger.info(f"Реальна угода {side} для {symbol}: {quantity} @ {price}")
+            else:
+                # Віртуальне виконання
+                logger.info(f"Віртуальна угода {side} для {symbol}: {quantity} @ {price}")
+
+            # Зберігаємо угоду в БД
+            self._save_order(strategy, symbol, side, price, quantity)
+
+        except Exception as e:
+            logger.error(f"Помилка виконання угоди: {e}")
 
     async def start_all_strategies(self):
         """Запуск всіх стратегій (активних та неактивних)"""

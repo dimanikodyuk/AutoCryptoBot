@@ -15,6 +15,7 @@ from database.db import get_db, get_price_history
 from datetime import datetime
 from web.hooks import register_webhook_routes
 from web.webhook_routes import register_webhook_routes
+from backend.api.routes_tech_analysis import tech_analysis_bp
 
 logger = setup_logger('web')
 
