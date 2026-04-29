@@ -890,7 +890,7 @@
                 if (tabName === 'signals') { refreshSignalsData(); }
                 if (tabName === 'database') { loadDatabaseInfo(); }
                 if (tabName === 'logs') { loadLogModules(); loadLogSettings(); loadLogs(); }
-                if (tabName === 'controls') { loadSystemStatus(); loadElectricity(); loadMode(); loadRealBalance(); }
+                if (tabName === 'controls') { loadSystemStatus(); loadPowerStatus(); loadMode(); loadRealBalance(); }
                 if (tabName === 'backtest') { setDefaultBacktestDates(); }
                 if (tabName === 'metrics') { loadMetrics(); }
                 if (tabName === 'health') { startHealthMonitor(); }
@@ -1915,27 +1915,40 @@
         }
 
         async function loadElectricity() {
-            try {
-                const response = await fetch('/api/electricity');
-                const data = await response.json();
+    try {
+        // Використовуємо новий API power/status замість electricity
+        const response = await fetch('/api/power/status');
 
-                const powerCostElem = document.getElementById('powerCost');
-                const powerEnergyElem = document.getElementById('powerEnergy');
-                const powerMonthlyElem = document.getElementById('powerMonthly');
-                const powerYearlyElem = document.getElementById('powerYearly');
-                const currentPowerElem = document.getElementById('currentPower');
-                const cpuLoadElem = document.getElementById('cpuLoad');
-
-                if (powerCostElem) powerCostElem.innerHTML = `${data.cost_uah} ₴`;
-                if (powerEnergyElem) powerEnergyElem.innerHTML = `${data.energy_used_kwh} кВт⋅год`;
-                if (powerMonthlyElem) powerMonthlyElem.innerHTML = `${data.monthly_cost_uah} ₴`;
-                if (powerYearlyElem) powerYearlyElem.innerHTML = `${data.yearly_cost_uah} ₴`;
-                if (currentPowerElem) currentPowerElem.innerHTML = `${data.current_power} W`;
-                if (cpuLoadElem) cpuLoadElem.innerHTML = `${data.cpu_load}%`;
-            } catch(e) {
-                console.error('Помилка loadElectricity:', e);
-            }
+        if (!response.ok) {
+            console.warn('Power API не доступний');
+            return;
         }
+
+        const data = await response.json();
+
+        // Оновлюємо всі поля
+        const powerCostElem = document.getElementById('powerCost');
+        const powerEnergyElem = document.getElementById('powerEnergy');
+        const powerTotalCostElem = document.getElementById('powerTotalCost');
+        const powerTotalEnergyElem = document.getElementById('powerTotalEnergy');
+        const powerSessionsElem = document.getElementById('powerSessions');
+        const powerMonthElem = document.getElementById('powerMonth');
+        const powerYearElem = document.getElementById('powerYear');
+        const currentPowerElem = document.getElementById('currentPower');
+
+        if (powerCostElem) powerCostElem.innerHTML = `${(data.session_cost_uah || 0).toFixed(2)} ₴`;
+        if (powerEnergyElem) powerEnergyElem.innerHTML = `${(data.session_energy_kwh || 0).toFixed(4)} кВт⋅год`;
+        if (powerTotalCostElem) powerTotalCostElem.innerHTML = `${(data.total_cost_uah || 0).toFixed(2)} ₴`;
+        if (powerTotalEnergyElem) powerTotalEnergyElem.innerHTML = `${(data.total_energy_kwh || 0).toFixed(4)} кВт⋅год`;
+        if (powerSessionsElem) powerSessionsElem.innerHTML = `${(data.total_hours || 0).toFixed(1)} год`;
+        if (powerMonthElem) powerMonthElem.innerHTML = `${(data.month_cost_uah || 0).toFixed(2)} ₴`;
+        if (powerYearElem) powerYearElem.innerHTML = `${(data.year_cost_uah || 0).toFixed(2)} ₴`;
+        if (currentPowerElem) currentPowerElem.innerHTML = `${(data.current_power_watts || 0).toFixed(2)} W`;
+
+    } catch(e) {
+        console.error('Помилка завантаження електроенергії:', e);
+    }
+}
 
         // ============= ГРАФІК УГОДИ =============
         let tradeChartInstance = null;
