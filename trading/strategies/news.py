@@ -141,6 +141,12 @@ class NewsStrategy(BaseStrategy):
 
         try:
             resp = requests.get("https://newsapi.org/v2/everything", params=params, timeout=15)
+
+            if resp.status_code == 429:
+                logger.warning("NewsAPI ліміт вичерпано. Наступна спроба через 60 хвилин")
+                # Не оновлюємо last_update, щоб спробувати пізніше
+                return []
+
             if resp.status_code == 200:
                 data = resp.json()
                 articles = data.get('articles', [])

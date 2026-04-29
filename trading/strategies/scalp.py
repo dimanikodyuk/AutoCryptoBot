@@ -225,6 +225,7 @@ class ScalpStrategy(BaseStrategy):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (order_id, self.strategy_id, symbol, side, price, quantity, status, 'Market',
                   datetime.now().isoformat(), stop_loss, take_profit))
+            logger.info(f"✅ Ордер збережено: {order_id} {side} {quantity} {symbol} @ {price}")
 
     def _update_order(self, order_id: str, pnl: float = None, commission: float = None, status: str = None):
         with get_db() as conn:
@@ -743,6 +744,7 @@ class ScalpStrategy(BaseStrategy):
 
         # Розраховуємо Stop Loss ціну
         stop_loss_price = current_price * (1 - self.stop_loss_percent / 100)
+        take_profit_price = current_price * (1 + self.take_profit_percent / 100)
 
         self.open_positions[symbol] = {
             'order_id': order_id,
@@ -750,14 +752,17 @@ class ScalpStrategy(BaseStrategy):
             'quantity': quantity,
             'highest_price': current_price,
             'lowest_price': current_price,
-            'stop_loss': stop_loss_price,  # ← ДОДАЄМО ЗБЕРЕЖЕННЯ SL
-            'take_profit': current_price * (1 + self.take_profit_percent / 100),
+            'stop_loss': stop_loss_price,
+            'take_profit': take_profit_price,
             'strong_signal': strong,
             'opened_at': datetime.now().isoformat()
         }
 
         self.locked_balance += cost
-        self._save_order(order_id, symbol, 'buy', current_price, quantity, 'open')
+
+        # ВАЖЛИВО: зберігаємо ордер в БД
+        self._save_order(order_id, symbol, 'buy', current_price, quantity, 'open', stop_loss_price, take_profit_price)
+
         await self._save_trade_chart_data(order_id, symbol, datetime.now())
 
         signal_type = "🔥 СИЛЬНИЙ СИГНАЛ" if strong else "✅ Звичайний сигнал"
