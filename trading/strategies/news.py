@@ -24,6 +24,8 @@ class NewsStrategy(BaseStrategy):
         self.enabled = saved.get('enabled', False)
         self.trade_size_usdt = saved.get('trade_size_usdt', 20)
 
+        self._last_error_time = None  # ← ДОДАТИ
+
         self.balance = 100.0
         self.locked_balance = 0.0
         self.total_pnl = 0.0
@@ -91,22 +93,59 @@ class NewsStrategy(BaseStrategy):
 
     def _load_history(self):
         with get_db() as conn:
-            bal = conn.execute("SELECT amount FROM balances WHERE strategy_id=? AND asset='USDT' AND symbol IS NULL",
-                               (self.strategy_id,)).fetchone()
+            # Завантажуємо баланс
+            bal = conn.execute(
+                "SELECT amount FROM balances WHERE strategy_id=? AND asset='USDT' AND symbol IS NULL",
+                (self.strategy_id,)
+            ).fetchone()
+
             if bal:
                 self.balance = bal['amount']
             else:
                 self.balance = 100.0
                 self._save_balance()
+
+            # Відновлюємо час останнього оновлення новин
+            last = conn.execute(
+                "SELECT value FROM system_settings WHERE key = 'news_last_update'"
+            ).fetchone()
+            if last and last['value']:
+                try:
+                    self.last_update = datetime.fromisoformat(last['value'])
+                    logger.info(f"[News] Відновлено час останнього оновлення: {self.last_update}")
+                except Exception as e:
+                    logger.error(f"[News] Помилка відновлення часу оновлення: {e}")
+                    self.last_update = None
+            else:
+                self.last_update = None
+
+            # Завантажуємо статистику угод
             stats = conn.execute(
                 "SELECT SUM(pnl) as pnl, COUNT(*) as cnt FROM orders WHERE strategy_id=? AND status='closed'",
-                (self.strategy_id,)).fetchone()
+                (self.strategy_id,)
+            ).fetchone()
+
             if stats and stats['pnl']:
                 self.total_pnl = stats['pnl']
                 self.total_trades = stats['cnt']
-            win = conn.execute("SELECT COUNT(*) FROM orders WHERE strategy_id=? AND status='closed' AND pnl>0",
-                               (self.strategy_id,)).fetchone()
+
+            # Завантажуємо кількість прибуткових угод
+            win = conn.execute(
+                "SELECT COUNT(*) FROM orders WHERE strategy_id=? AND status='closed' AND pnl>0",
+                (self.strategy_id,)
+            ).fetchone()
             self.winning_trades = win[0] if win else 0
+
+            # Розраховуємо збиткові угоди
+            self.losing_trades = self.total_trades - self.winning_trades
+
+            # Оновлюємо денний початковий баланс для drawdown (якщо потрібно)
+            if self.daily_start_balance == 0:
+                self.daily_start_balance = self.balance
+                self.daily_lowest_balance = self.balance
+
+            logger.info(
+                f"[News] Завантажено історію: баланс=${self.balance}, PnL=${self.total_pnl}, угод={self.total_trades}")
 
     def _save_balance(self):
         with get_db() as conn:
@@ -142,14 +181,19 @@ class NewsStrategy(BaseStrategy):
         try:
             resp = requests.get("https://newsapi.org/v2/everything", params=params, timeout=15)
 
+            # Обробка помилки 429 (Too Many Requests)
             if resp.status_code == 429:
-                logger.warning("NewsAPI ліміт вичерпано. Наступна спроба через 60 хвилин")
-                # Не оновлюємо last_update, щоб спробувати пізніше
-                return []
+                logger.warning("NewsAPI ліміт вичерпано (429). Наступна спроба через 1 годину")
+                add_log("WARNING", self.name, "NewsAPI ліміт вичерпано")
+                self._last_error_time = datetime.now()
+                return []  # Повертаємо пустий список
 
             if resp.status_code == 200:
                 data = resp.json()
                 articles = data.get('articles', [])
+
+                # Скидаємо помилку якщо запит успішний
+                self._last_error_time = None
 
                 # Фільтруємо новини за останні 2 години
                 cutoff_time = datetime.now() - timedelta(hours=2)
@@ -163,7 +207,7 @@ class NewsStrategy(BaseStrategy):
                             if pub_time > cutoff_time:
                                 new_articles.append(article)
                         except:
-                            new_articles.append(article)  # якщо не можемо розпарсити - додаємо
+                            new_articles.append(article)
 
                 self.articles_count = len(new_articles)
                 logger.info(f"Отримано {len(articles)} новин, за останні 2 години: {len(new_articles)}")
@@ -171,6 +215,7 @@ class NewsStrategy(BaseStrategy):
             else:
                 logger.error(f"NewsAPI помилка {resp.status_code}")
                 return []
+
         except Exception as e:
             logger.error(f"Помилка запиту: {e}")
             return []
@@ -211,22 +256,51 @@ class NewsStrategy(BaseStrategy):
             logger.warning(f"[News] Торгівля заблокована: {self._block_reason}")
             return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
 
-        need_update = (self.last_update is None or (
-                    datetime.now() - self.last_update).seconds > self.interval_minutes * 60)
+        # Перевіряємо чи потрібно оновлення
+        need_update = (self.last_update is None or
+                       (datetime.now() - self.last_update).seconds > self.interval_minutes * 60)
+
+        # Додаткова перевірка на помилку 429 - не оновлюємо якщо остання помилка була менше 1 години тому
+        if need_update and hasattr(self, '_last_error_time') and self._last_error_time:
+            error_age = (datetime.now() - self._last_error_time).seconds
+            if error_age < 3600:  # 1 година
+                logger.info(f"[News] Пропускаємо оновлення через помилку 429 (минуло {error_age // 60} хвилин)")
+                need_update = False
+
         if need_update:
             add_log("INFO", self.name, "Початок оновлення новин")
             logger.info("Оновлення новин...")
+
             articles = await self.fetch_news()
+
+            # Якщо fetch_news повернув пустий список через помилку 429
+            if articles is None:
+                # Вже залоговано в fetch_news
+                return {'action': 'hold', 'sentiment': self.current_sentiment}
+
             self.last_news = articles
             self.last_update = datetime.now()
+
+            # ЗБЕРІГАЄМО ЧАС ОСТАННЬОГО ОНОВЛЕННЯ В БД
+            try:
+                from database.db import get_db
+                with get_db() as conn:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)",
+                        ('news_last_update', self.last_update.isoformat())
+                    )
+            except Exception as e:
+                logger.error(f"Помилка збереження часу оновлення: {e}")
+
             add_log("INFO", self.name, f"Отримано {len(articles)} новин")
+
             if articles:
                 sent = self.analyze_sentiment(articles)
                 self.current_sentiment = sent['overall']
                 add_log("INFO", self.name,
                         f"Сентимент: {self.current_sentiment} (поз:{sent['positive']}, нег:{sent['negative']}, нейтр:{sent['neutral']})")
 
-                # ЗБЕРІГАЄМО В БД
+                # ЗБЕРІГАЄМО СЕНТИМЕНТ В БД
                 from database.db import save_sentiment_history
                 save_sentiment_history(
                     overall=sent['overall'],
@@ -241,7 +315,9 @@ class NewsStrategy(BaseStrategy):
                 signal = self._generate_signal(sent)
                 return signal
             else:
-                add_log("DEBUG", self.name, f"Оновлення не потрібно, наступне через {self.interval_minutes} хв")
+                add_log("DEBUG", self.name, "Новин не отримано (можливо ліміт API)")
+                return {'action': 'hold', 'sentiment': self.current_sentiment}
+
         return {'action': 'hold', 'sentiment': self.current_sentiment}
 
     def _generate_signal(self, sent):
