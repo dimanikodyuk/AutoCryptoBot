@@ -181,24 +181,9 @@ class PowerMonitor:
         uptime_seconds = int(time.time() - self.start_time) if self.start_time else 0
         current_power = self._calculate_current_power()
 
-        # Отримуємо дані за поточну сесію з БД
-        session = get_current_session()
-        session_stats = {}
-
-        if session:
-            with get_power_db() as conn:
-                cursor = conn.execute('''
-                    SELECT 
-                        SUM(energy_kwh) as energy,
-                        SUM(cost_uah) as cost
-                    FROM power_hourly
-                    WHERE session_id = ?
-                ''', (session['session_id'],))
-                row = cursor.fetchone()
-                session_stats = {
-                    'energy_kwh': round(row['energy'] or 0, 4),
-                    'cost_uah': round(row['cost'] or 0, 2)
-                }
+        # Розраховуємо енергію за поточну сесію на основі uptime
+        session_energy_kwh = (current_power * uptime_seconds / 3600) / 1000
+        session_cost_uah = session_energy_kwh * self.price_per_kwh
 
         # Отримуємо загальну статистику
         summary = get_power_summary()
@@ -208,8 +193,8 @@ class PowerMonitor:
             'uptime_seconds': uptime_seconds,
             'uptime_hours': round(uptime_seconds / 3600, 2),
             'session_id': self.session_id,
-            'session_energy_kwh': session_stats.get('energy_kwh', 0),
-            'session_cost_uah': session_stats.get('cost_uah', 0),
+            'session_energy_kwh': round(session_energy_kwh, 4),
+            'session_cost_uah': round(session_cost_uah, 2),
             'total_energy_kwh': summary['total_energy_kwh'],
             'total_cost_uah': summary['total_cost_uah'],
             'total_hours': summary['total_hours'],

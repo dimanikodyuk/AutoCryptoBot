@@ -237,6 +237,28 @@ def update_daily_aggregates() -> None:
 def get_power_history(days: int = 30) -> List[Dict]:
     """Отримання історії споживання"""
     with get_power_db() as conn:
+        # Отримуємо денні агрегати з power_hourly
+        cursor = conn.execute('''
+            SELECT 
+                date(timestamp) as date,
+                SUM(energy_kwh) as total_energy_kwh,
+                SUM(cost_uah) as total_cost_uah,
+                AVG(power_watts) as avg_power_watts,
+                MAX(power_watts) as max_power_watts,
+                MIN(power_watts) as min_power_watts,
+                COUNT(*) as total_hours
+            FROM power_hourly
+            WHERE timestamp >= date('now', '-' || ? || ' days')
+            GROUP BY date(timestamp)
+            ORDER BY date DESC
+        ''', (days,))
+
+        rows = cursor.fetchall()
+
+        if rows:
+            return [dict(row) for row in rows]
+
+        # Якщо немає даних в power_hourly, беремо з power_daily
         cursor = conn.execute('''
             SELECT * FROM power_daily 
             WHERE date >= date('now', '-' || ? || ' days')
@@ -246,9 +268,9 @@ def get_power_history(days: int = 30) -> List[Dict]:
 
 
 def get_power_summary() -> Dict:
-    """Отримання загальної статистики"""
+    """Отримання загальної статистики (включаючи поточну сесію)"""
     with get_power_db() as conn:
-        # Загальна статистика за весь час
+        # Загальна статистика за весь час (включаючи незавершену сесію)
         total = conn.execute('''
             SELECT 
                 SUM(energy_kwh) as total_energy,
@@ -256,17 +278,47 @@ def get_power_summary() -> Dict:
                 AVG(power_watts) as avg_power,
                 COUNT(DISTINCT session_id) as total_sessions,
                 SUM(total_uptime_seconds) / 3600.0 as total_hours
-            FROM power_sessions
-            WHERE end_time IS NOT NULL
+            FROM (
+                SELECT energy_kwh, cost_uah, power_watts, session_id, total_uptime_seconds FROM power_hourly
+                UNION ALL
+                SELECT total_energy_kwh, total_cost_uah, avg_power_watts, session_id, total_uptime_seconds FROM power_sessions
+            )
         ''').fetchone()
+
+        # Якщо немає даних в power_hourly, беремо з поточної сесії
+        if total['total_energy'] is None:
+            # Отримуємо поточну сесію
+            current = conn.execute('''
+                SELECT total_energy_kwh, total_cost_uah, avg_power_watts, total_uptime_seconds
+                FROM power_sessions 
+                WHERE end_time IS NULL
+                ORDER BY start_time DESC LIMIT 1
+            ''').fetchone()
+
+            if current:
+                total = {
+                    'total_energy': current['total_energy_kwh'] or 0,
+                    'total_cost': current['total_cost_uah'] or 0,
+                    'avg_power': current['avg_power_watts'] or 0,
+                    'total_sessions': 1,
+                    'total_hours': (current['total_uptime_seconds'] or 0) / 3600.0
+                }
+            else:
+                total = {
+                    'total_energy': 0,
+                    'total_cost': 0,
+                    'avg_power': 0,
+                    'total_sessions': 0,
+                    'total_hours': 0
+                }
 
         # Статистика за поточний місяць
         current_month = conn.execute('''
             SELECT 
                 SUM(energy_kwh) as month_energy,
                 SUM(cost_uah) as month_cost
-            FROM power_daily
-            WHERE date >= date('now', 'start of month')
+            FROM power_hourly
+            WHERE timestamp >= date('now', 'start of month')
         ''').fetchone()
 
         # Статистика за поточний рік
@@ -274,8 +326,8 @@ def get_power_summary() -> Dict:
             SELECT 
                 SUM(energy_kwh) as year_energy,
                 SUM(cost_uah) as year_cost
-            FROM power_daily
-            WHERE date >= date('now', 'start of year')
+            FROM power_hourly
+            WHERE timestamp >= date('now', 'start of year')
         ''').fetchone()
 
         return {
