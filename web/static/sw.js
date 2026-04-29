@@ -114,3 +114,18 @@ self.addEventListener('notificationclick', event => {
     );
   }
 });
+
+if ('serviceWorker' in navigator) {
+    // Спочатку перевіряємо чи файл існує без використання HEAD (який дає 404)
+    // Просто пробуємо зареєструвати і обробляємо помилку
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+                console.log('✅ Service Worker зареєстровано:', registration.scope);
+            })
+            .catch(error => {
+                // Це нормально, якщо sw.js не існує - просто логуємо як інформацію, а не помилку
+                console.log('ℹ️ Service Worker не налаштовано (файл відсутній)');
+            });
+    });
+}

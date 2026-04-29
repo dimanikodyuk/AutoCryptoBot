@@ -564,14 +564,30 @@ class ScalpStrategy(BaseStrategy):
             return None
 
     async def on_price_update(self, symbol: str, price: float):
-        """Оновлення ціни через WebSocket"""
+        """Оновлення ціни через WebSocket — перевіряємо TP/SL на кожному тіку"""
         self.current_prices[symbol] = price
 
-        # Оновлюємо PnL для відкритих позицій
-        if symbol in self.open_positions:
-            position = self.open_positions[symbol]
-            pnl_percent = (price - position['entry_price']) / position['entry_price'] * 100
-            logger.debug(f"[{symbol}] Оновлення ціни: ${price:.2f}, PnL: {pnl_percent:.2f}%")
+        if symbol not in self.open_positions:
+            return
+
+        position = self.open_positions[symbol]
+
+        # Оновлюємо highest/lowest для trailing stop
+        if price > position.get('highest_price', price):
+            position['highest_price'] = price
+        if price < position.get('lowest_price', price):
+            position['lowest_price'] = price
+
+        pnl_percent = (price - position['entry_price']) / position['entry_price'] * 100
+        logger.debug(f"[{symbol}] WebSocket тік: ${price:.2f}, PnL: {pnl_percent:.2f}%")
+
+        # Перевіряємо сигнали виходу на кожному тіку
+        exit_signal = await self.check_exit_signals(symbol, position, price)
+        if exit_signal != 'hold':
+            logger.info(f"[{symbol}] ⚡ WebSocket TP/SL спрацював: {exit_signal} @ ${price:.2f}")
+            add_log("INFO", self.name, f"[{symbol}] ⚡ Вихід по WebSocket: {exit_signal} @ ${price:.2f}")
+            # Запускаємо закриття як окрему задачу, щоб не блокувати WebSocket callback
+            asyncio.create_task(self._close_position(symbol, exit_signal, price))
 
     async def _calculate_atr(self, highs: List[float], lows: List[float], closes: List[float],
                              period: int = 14) -> float:
@@ -784,13 +800,24 @@ class ScalpStrategy(BaseStrategy):
         self.update_balance_for_drawdown()
 
     async def _close_position(self, symbol: str, reason: str, price: float):
+        # Захист від race condition: якщо WebSocket і analyze() одночасно спробують закрити
+        if symbol not in self.open_positions:
+            logger.debug(f"[{symbol}] Позиція вже закрита (race condition захист)")
+            return
+
         position = self.open_positions.get(symbol)
-        # Після закриття позиції, оновлюємо свічки до моменту закриття
+        if not position:
+            logger.warning(f"[{symbol}] Позиція не знайдена для закриття")
+            return
+
+        # Одразу видаляємо з open_positions щоб уникнути повторного виклику
+        del self.open_positions[symbol]
+
+        # Зберігаємо дані для chart після закриття
         opened_at_str = position.get('opened_at')
         if opened_at_str:
             opened_at = datetime.fromisoformat(opened_at_str)
         else:
-            # Якщо немає opened_at, використовуємо поточний час
             opened_at = datetime.now()
 
         await self._save_trade_chart_data(
@@ -799,9 +826,6 @@ class ScalpStrategy(BaseStrategy):
             opened_at,
             datetime.now()
         )
-        if not position:
-            logger.warning(f"[{symbol}] Позиція не знайдена для закриття")
-            return
 
         try:
             revenue = position['quantity'] * price
@@ -813,6 +837,8 @@ class ScalpStrategy(BaseStrategy):
 
             if result.get('error'):
                 logger.error(f"Помилка закриття позиції {symbol}: {result}")
+                # Повертаємо позицію назад якщо ордер не пройшов
+                self.open_positions[symbol] = position
                 return
 
             self.balance += revenue - commission
@@ -840,10 +866,6 @@ class ScalpStrategy(BaseStrategy):
                 'reset': '🔄 Скидання'
             }.get(reason, reason)
 
-            order_id_saved = position['order_id']
-            entry_price_saved = position['entry_price']
-            del self.open_positions[symbol]
-
             add_log("INFO", self.name,
                     f"📉 Закрито LONG позицію {symbol} @ ${price:.2f} | PnL: ${pnl:.2f} | {reason_text}")
 
@@ -853,7 +875,7 @@ class ScalpStrategy(BaseStrategy):
                 await self.telegram_bot.send_notification(
                     f"📉 *ЗАКРИТО ПОЗИЦІЮ* (Scalp)\n"
                     f"└ Пара: `{symbol}`\n"
-                    f"└ Ціна входу: `${entry_price_saved:.2f}`\n"
+                    f"└ Ціна входу: `${position['entry_price']:.2f}`\n"
                     f"└ Ціна виходу: `${price:.2f}`\n"
                     f"└ PnL: {pnl_icon} `${pnl:.2f}`\n"
                     f"└ Причина: {reason_text}",
@@ -864,9 +886,7 @@ class ScalpStrategy(BaseStrategy):
 
         except Exception as e:
             logger.error(f"Критична помилка при закритті позиції {symbol}: {e}")
-            # Примусово видаляємо позицію, щоб уникнути блокування
-            if symbol in self.open_positions:
-                del self.open_positions[symbol]
+            add_log("ERROR", self.name, f"Критична помилка закриття {symbol}: {e}")
 
     async def calculate_bollinger_bands(self, prices: List[float], period: int = 20, std_dev: float = 2) -> Dict:
         """

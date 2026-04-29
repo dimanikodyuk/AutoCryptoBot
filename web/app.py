@@ -955,6 +955,29 @@ def create_flask_app(config, trading_engine):
 
         return jsonify({'success': True})
 
+    @app.route('/api/grid/force_rebuild', methods=['POST'])
+    @async_route
+    async def api_grid_force_rebuild():
+        data = request.get_json()
+        symbol = data.get('symbol')
+
+        for strategy in trading_engine.strategies.values():
+            if strategy.name == 'grid' and hasattr(strategy, 'grids'):
+                if symbol in strategy.grids:
+                    grid = strategy.grids[symbol]
+                    price = await trading_engine.exchange.get_current_price(symbol)
+                    if price > 0:
+                        # Скасовуємо всі ордери
+                        for oid in list(grid.active_buy_orders.keys()):
+                            await grid.cancel_order(oid)
+                        for oid in list(grid.active_sell_orders.keys()):
+                            await grid.cancel_order(oid)
+                        # Перебудовуємо сітку
+                        grid.is_initialized = False
+                        await grid.initialize_grid(price)
+                        return jsonify({'success': True})
+        return jsonify({'error': 'Grid not found'}), 404
+
     # ============= База даних API =============
 
     @app.route('/api/db_tables_list')
