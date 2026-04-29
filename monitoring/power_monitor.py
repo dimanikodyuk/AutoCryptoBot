@@ -194,29 +194,11 @@ class PowerMonitor:
             uptime_seconds = int(time.time() - self.start_time) if self.start_time else 0
             current_power = self._calculate_current_power()
 
-            # Якщо монітор не запущений, повертаємо дані на основі uptime
-            if not self.running or not self.start_time:
-                return {
-                    'current_power_watts': round(current_power, 2),
-                    'uptime_seconds': 0,
-                    'uptime_hours': 0,
-                    'session_id': None,
-                    'session_energy_kwh': 0,
-                    'session_cost_uah': 0,
-                    'total_energy_kwh': 0,
-                    'total_cost_uah': 0,
-                    'total_hours': 0,
-                    'month_energy_kwh': 0,
-                    'month_cost_uah': 0,
-                    'year_energy_kwh': 0,
-                    'year_cost_uah': 0
-                }
-
             # Розраховуємо енергію за поточну сесію
             session_energy_kwh = (current_power * uptime_seconds / 3600) / 1000
             session_cost_uah = session_energy_kwh * self.price_per_kwh
 
-            # Отримуємо дані з БД
+            # Отримуємо загальну статистику
             try:
                 summary = get_power_summary()
             except Exception as e:
@@ -238,16 +220,18 @@ class PowerMonitor:
                 'session_id': self.session_id,
                 'session_energy_kwh': round(session_energy_kwh, 4),
                 'session_cost_uah': round(session_cost_uah, 2),
-                'total_energy_kwh': round(summary.get('total_energy_kwh', session_energy_kwh), 2),
-                'total_cost_uah': round(summary.get('total_cost_uah', session_cost_uah), 2),
-                'total_hours': round(summary.get('total_hours', uptime_seconds / 3600), 2),
-                'month_energy_kwh': round(summary.get('month_energy_kwh', session_energy_kwh * 30), 2),
-                'month_cost_uah': round(summary.get('month_cost_uah', session_cost_uah * 30), 2),
-                'year_energy_kwh': round(summary.get('year_energy_kwh', session_energy_kwh * 365), 2),
-                'year_cost_uah': round(summary.get('year_cost_uah', session_cost_uah * 365), 2)
+                'total_energy_kwh': round(summary.get('total_energy_kwh', 0), 2),
+                'total_cost_uah': round(summary.get('total_cost_uah', 0), 2),
+                'total_hours': round(summary.get('total_hours', 0), 2),
+                'month_energy_kwh': round(summary.get('month_energy_kwh', 0), 2),
+                'month_cost_uah': round(summary.get('month_cost_uah', 0), 2),
+                'year_energy_kwh': round(summary.get('year_energy_kwh', 0), 2),
+                'year_cost_uah': round(summary.get('year_cost_uah', 0), 2)
             }
         except Exception as e:
             logger.error(f"Помилка get_current_stats: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 'current_power_watts': 0,
                 'uptime_seconds': 0,

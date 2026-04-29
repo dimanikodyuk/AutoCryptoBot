@@ -268,40 +268,39 @@ def get_power_history(days: int = 30) -> List[Dict]:
 
 
 def get_power_summary() -> Dict:
-    """Отримання загальної статистики (включаючи поточну сесію)"""
+    """Отримання загальної статистики"""
     with get_power_db() as conn:
-        # Загальна статистика за весь час (включаючи незавершену сесію)
+        # Загальна статистика за весь час
         total = conn.execute('''
             SELECT 
-                SUM(energy_kwh) as total_energy,
-                SUM(cost_uah) as total_cost,
-                AVG(power_watts) as avg_power,
+                COALESCE(SUM(energy_kwh), 0) as total_energy,
+                COALESCE(SUM(cost_uah), 0) as total_cost,
+                COALESCE(AVG(power_watts), 0) as avg_power,
                 COUNT(DISTINCT session_id) as total_sessions,
-                SUM(total_uptime_seconds) / 3600.0 as total_hours
-            FROM (
-                SELECT energy_kwh, cost_uah, power_watts, session_id, total_uptime_seconds FROM power_hourly
-                UNION ALL
-                SELECT total_energy_kwh, total_cost_uah, avg_power_watts, session_id, total_uptime_seconds FROM power_sessions
-            )
+                COALESCE(SUM(CASE WHEN energy_kwh > 0 THEN 1 ELSE 0 END) * 0.0167, 0) as total_hours
+            FROM power_hourly
         ''').fetchone()
 
         # Якщо немає даних в power_hourly, беремо з поточної сесії
-        if total['total_energy'] is None:
-            # Отримуємо поточну сесію
+        if total['total_energy'] == 0:
             current = conn.execute('''
-                SELECT total_energy_kwh, total_cost_uah, avg_power_watts, total_uptime_seconds
+                SELECT 
+                    total_energy_kwh, 
+                    total_cost_uah,
+                    total_uptime_seconds
                 FROM power_sessions 
                 WHERE end_time IS NULL
                 ORDER BY start_time DESC LIMIT 1
             ''').fetchone()
 
-            if current:
+            if current and current['total_uptime_seconds']:
+                total_hours = current['total_uptime_seconds'] / 3600
                 total = {
                     'total_energy': current['total_energy_kwh'] or 0,
                     'total_cost': current['total_cost_uah'] or 0,
-                    'avg_power': current['avg_power_watts'] or 0,
+                    'avg_power': 0,
                     'total_sessions': 1,
-                    'total_hours': (current['total_uptime_seconds'] or 0) / 3600.0
+                    'total_hours': total_hours
                 }
             else:
                 total = {
@@ -315,8 +314,8 @@ def get_power_summary() -> Dict:
         # Статистика за поточний місяць
         current_month = conn.execute('''
             SELECT 
-                SUM(energy_kwh) as month_energy,
-                SUM(cost_uah) as month_cost
+                COALESCE(SUM(energy_kwh), 0) as month_energy,
+                COALESCE(SUM(cost_uah), 0) as month_cost
             FROM power_hourly
             WHERE timestamp >= date('now', 'start of month')
         ''').fetchone()
@@ -324,22 +323,22 @@ def get_power_summary() -> Dict:
         # Статистика за поточний рік
         current_year = conn.execute('''
             SELECT 
-                SUM(energy_kwh) as year_energy,
-                SUM(cost_uah) as year_cost
+                COALESCE(SUM(energy_kwh), 0) as year_energy,
+                COALESCE(SUM(cost_uah), 0) as year_cost
             FROM power_hourly
             WHERE timestamp >= date('now', 'start of year')
         ''').fetchone()
 
         return {
-            'total_energy_kwh': round(total['total_energy'] or 0, 2),
-            'total_cost_uah': round(total['total_cost'] or 0, 2),
-            'avg_power_watts': round(total['avg_power'] or 0, 2),
+            'total_energy_kwh': round(total['total_energy'], 2),
+            'total_cost_uah': round(total['total_cost'], 2),
+            'avg_power_watts': round(total['avg_power'], 2),
             'total_sessions': total['total_sessions'] or 0,
-            'total_hours': round(total['total_hours'] or 0, 2),
-            'month_energy_kwh': round(current_month['month_energy'] or 0, 2),
-            'month_cost_uah': round(current_month['month_cost'] or 0, 2),
-            'year_energy_kwh': round(current_year['year_energy'] or 0, 2),
-            'year_cost_uah': round(current_year['year_cost'] or 0, 2)
+            'total_hours': round(total['total_hours'], 2),
+            'month_energy_kwh': round(current_month['month_energy'], 2),
+            'month_cost_uah': round(current_month['month_cost'], 2),
+            'year_energy_kwh': round(current_year['year_energy'], 2),
+            'year_cost_uah': round(current_year['year_cost'], 2)
         }
 
 
