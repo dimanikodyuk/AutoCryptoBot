@@ -33,6 +33,9 @@ class ScalpStrategy(BaseStrategy):
         self.stop_loss_percent = saved_settings.get('stop_loss_percent', 0.6)  # Збільшили з 0.25 до 0.6
         self.trailing_stop_percent = saved_settings.get('trailing_stop_percent', 0.5)  # Збільшили з 0.3 до 0.5
 
+        self._closing_positions = set()  # Для захисту від дублювання закриття
+        self._opening_positions = set()  # Для захисту від дублювання відкриття
+
         # Параметри індикаторів
         self.rsi_period = 14
         self.rsi_overbought = 70
@@ -570,6 +573,10 @@ class ScalpStrategy(BaseStrategy):
         if symbol not in self.open_positions:
             return
 
+        # Захист від дублювання
+        if symbol in self._closing_positions:
+            return
+
         position = self.open_positions[symbol]
 
         # Оновлюємо highest/lowest для trailing stop
@@ -578,16 +585,11 @@ class ScalpStrategy(BaseStrategy):
         if price < position.get('lowest_price', price):
             position['lowest_price'] = price
 
-        pnl_percent = (price - position['entry_price']) / position['entry_price'] * 100
-        logger.debug(f"[{symbol}] WebSocket тік: ${price:.2f}, PnL: {pnl_percent:.2f}%")
-
-        # Перевіряємо сигнали виходу на кожному тіку
+        # Перевіряємо сигнали виходу
         exit_signal = await self.check_exit_signals(symbol, position, price)
         if exit_signal != 'hold':
             logger.info(f"[{symbol}] ⚡ WebSocket TP/SL спрацював: {exit_signal} @ ${price:.2f}")
-            add_log("INFO", self.name, f"[{symbol}] ⚡ Вихід по WebSocket: {exit_signal} @ ${price:.2f}")
-            # Запускаємо закриття як окрему задачу, щоб не блокувати WebSocket callback
-            asyncio.create_task(self._close_position(symbol, exit_signal, price))
+            await self._close_position(symbol, exit_signal, price)
 
     async def _calculate_atr(self, highs: List[float], lows: List[float], closes: List[float],
                              period: int = 14) -> float:
@@ -646,61 +648,44 @@ class ScalpStrategy(BaseStrategy):
         # Перевірка лімітів
         if not self.can_trade(self.trade_size_usdt):
             logger.warning(f"[Scalp] Торгівля заблокована: {self._block_reason}")
-            add_log("WARNING", self.name, f"Торгівля заблокована: {self._block_reason}")
             return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
 
-        results = {}
         signals_generated = []
 
         for symbol in self.symbols:
             try:
+                # Пропускаємо якщо позиція вже відкривається або закривається
+                if symbol in self._opening_positions or symbol in self._closing_positions:
+                    continue
+
                 indicators = await self.get_indicators(symbol)
                 if not indicators:
-                    add_log("DEBUG", self.name, f"Немає індикаторів для {symbol}")
                     continue
 
                 price = indicators['price']
 
-                add_log("DEBUG", self.name,
-                        f"[{symbol}] RSI={indicators['rsi']:.1f}, MACD={indicators['macd']['histogram']:.4f}, "
-                        f"Buy={indicators['buy_signals']}, Sell={indicators['sell_signals']}, "
-                        f"Price=${price:.2f}")
-
-                logger.info(f"[{symbol}] RSI={indicators['rsi']:.1f}, MACD={indicators['macd']['histogram']:.2f}, "
-                            f"StochK={indicators['stoch_rsi']['k']:.1f}, Buy={indicators['buy_signals']}, Sell={indicators['sell_signals']}")
-
                 if symbol in self.open_positions:
                     exit_signal = await self.check_exit_signals(symbol, self.open_positions[symbol], price)
                     if exit_signal != 'hold':
-                        add_log("INFO", self.name, f"[{symbol}] Вихід за сигналом: {exit_signal}")
                         await self._close_position(symbol, exit_signal, price)
                 else:
                     # Перевіряємо чи є вільний баланс
                     if self.available_balance < self.trade_size_usdt:
-                        add_log("DEBUG", self.name, f"[{symbol}] Недостатньо балансу для входу")
-                        logger.debug(f"[{symbol}] Недостатньо балансу для входу: потрібно ${self.trade_size_usdt:.2f}, "
-                                     f"доступно ${self.available_balance:.2f}")
                         continue
 
-                    # Логуємо сигнали
                     if indicators['strong_buy']:
-                        logger.info(
-                            f"[{symbol}] 🔥 СИЛЬНИЙ СИГНАЛ НА ПОКУПКУ! Підтвердження: {indicators['buy_signals']}")
+                        logger.info(f"[{symbol}] 🔥 СИЛЬНИЙ СИГНАЛ НА ПОКУПКУ!")
                         signals_generated.append(f"{symbol}: STRONG_BUY")
-                        add_log("INFO", self.name, f"[{symbol}] 🔥 СИЛЬНИЙ СИГНАЛ НА ПОКУПКУ!")
                         await self._open_position(symbol, price, strong=True)
                     elif indicators['buy_signal']:
-                        add_log("INFO", self.name, f"[{symbol}] ✅ Сигнал на покупку!")
-                        logger.info(f"[{symbol}] ✅ Сигнал на покупку! Підтвердження: {indicators['buy_signals']}")
+                        logger.info(f"[{symbol}] ✅ Сигнал на покупку!")
                         signals_generated.append(f"{symbol}: BUY")
                         await self._open_position(symbol, price, strong=False)
 
             except Exception as e:
                 logger.error(f"Помилка аналізу {symbol}: {e}")
-                add_log("ERROR", self.name, f"Помилка аналізу {symbol}: {e}")
 
-        add_log("DEBUG", self.name, f"Аналіз завершено, сигналів: {len(signals_generated)}")
-        return {'action': 'hold', 'results': results, 'signals': signals_generated}
+        return {'action': 'hold', 'signals': signals_generated}
 
     async def execute(self, signal: dict):
         pass
@@ -734,104 +719,133 @@ class ScalpStrategy(BaseStrategy):
         return True
 
     async def _open_position(self, symbol: str, price: float, strong: bool = False):
-        # Отримуємо актуальну ціну
-        current_price = await self.exchange.get_current_price(symbol)
-
-        # Перевірка зміни ціни
-        price_diff_pct = abs(current_price - price) / price * 100 if price > 0 else 0
-        if price_diff_pct > 2:
-            logger.warning(f"[{symbol}] Ціна змінилась на {price_diff_pct:.2f}%! Позиція НЕ відкрита")
+        # Захист від дублювання відкриття
+        if symbol in self._opening_positions:
+            logger.debug(f"[{symbol}] Вже відкривається позиція, пропускаємо")
             return
 
-        quantity = self.trade_size_usdt / current_price
-        cost = quantity * current_price
-
-        if self.available_balance < cost:
-            logger.warning(f"[{symbol}] Недостатньо балансу: потрібно ${cost:.2f}")
+        if symbol in self.open_positions:
+            logger.debug(f"[{symbol}] Позиція вже відкрита, пропускаємо")
             return
 
-        order_id = f"scalp_{symbol}_{int(datetime.now().timestamp())}_{self.strategy_id}"
+        self._opening_positions.add(symbol)
 
-        result = await self.exchange.create_order(symbol, 'buy', 'Market', quantity, current_price)
+        try:
+            # Отримуємо актуальну ціну
+            current_price = await self.exchange.get_current_price(symbol)
 
-        if result.get('error'):
-            logger.error(f"Помилка відкриття позиції {symbol}: {result}")
-            return
+            # Перевірка зміни ціни
+            price_diff_pct = abs(current_price - price) / price * 100 if price > 0 else 0
+            if price_diff_pct > 2:
+                logger.warning(f"[{symbol}] Ціна змінилась на {price_diff_pct:.2f}%! Позиція НЕ відкрита")
+                return
 
-        # Розраховуємо Stop Loss ціну
-        stop_loss_price = current_price * (1 - self.stop_loss_percent / 100)
-        take_profit_price = current_price * (1 + self.take_profit_percent / 100)
+            quantity = self.trade_size_usdt / current_price
+            cost = quantity * current_price
 
-        self.open_positions[symbol] = {
-            'order_id': order_id,
-            'entry_price': current_price,
-            'quantity': quantity,
-            'highest_price': current_price,
-            'lowest_price': current_price,
-            'stop_loss': stop_loss_price,
-            'take_profit': take_profit_price,
-            'strong_signal': strong,
-            'opened_at': datetime.now().isoformat()
-        }
+            if self.available_balance < cost:
+                logger.warning(f"[{symbol}] Недостатньо балансу: потрібно ${cost:.2f}")
+                return
 
-        self.locked_balance += cost
+            # Перевірка чи немає вже відкритої позиції (ще раз для безпеки)
+            if symbol in self.open_positions:
+                logger.warning(f"[{symbol}] Позиція вже існує, пропускаємо")
+                return
 
-        # ВАЖЛИВО: зберігаємо ордер в БД
-        self._save_order(order_id, symbol, 'buy', current_price, quantity, 'open', stop_loss_price, take_profit_price)
+            order_id = f"scalp_{symbol}_{int(datetime.now().timestamp())}_{self.strategy_id}"
 
-        await self._save_trade_chart_data(order_id, symbol, datetime.now())
+            result = await self.exchange.create_order(symbol, 'buy', 'Market', quantity, current_price)
 
-        signal_type = "🔥 СИЛЬНИЙ СИГНАЛ" if strong else "✅ Звичайний сигнал"
-        add_log("INFO", self.name,
-                f"📈 Відкрито LONG позицію {symbol} @ ${current_price:.2f}, SL=${stop_loss_price:.2f} ({signal_type})")
+            if result.get('error'):
+                logger.error(f"Помилка відкриття позиції {symbol}: {result}")
+                return
 
-        if self.telegram_bot:
-            await self.telegram_bot.send_notification(
-                f"📈 *ВІДКРИТО ПОЗИЦІЮ* (Scalp)\n"
-                f"└ Пара: `{symbol}`\n"
-                f"└ Ціна: `${current_price:.2f}`\n"
-                f"└ SL: `${stop_loss_price:.2f}`\n"
-                f"└ Розмір: `{quantity:.6f}`\n"
-                f"└ Сигнал: {signal_type}",
-                parse_mode='Markdown'
-            )
+            # Розраховуємо Stop Loss та Take Profit
+            stop_loss_price = current_price * (1 - self.stop_loss_percent / 100)
+            take_profit_price = current_price * (1 + self.take_profit_percent / 100)
 
-        self.increment_daily_trades()
-        self.update_balance_for_drawdown()
+            self.open_positions[symbol] = {
+                'order_id': order_id,
+                'entry_price': current_price,
+                'quantity': quantity,
+                'highest_price': current_price,
+                'lowest_price': current_price,
+                'stop_loss': stop_loss_price,
+                'take_profit': take_profit_price,
+                'strong_signal': strong,
+                'opened_at': datetime.now().isoformat()
+            }
+
+            self.locked_balance += cost
+
+            # Зберігаємо ордер в БД
+            self._save_order(order_id, symbol, 'buy', current_price, quantity, 'open', stop_loss_price,
+                             take_profit_price)
+
+            await self._save_trade_chart_data(order_id, symbol, datetime.now())
+
+            signal_type = "🔥 СИЛЬНИЙ СИГНАЛ" if strong else "✅ Звичайний сигнал"
+            add_log("INFO", self.name,
+                    f"📈 Відкрито LONG позицію {symbol} @ ${current_price:.2f}, SL=${stop_loss_price:.2f} ({signal_type})")
+
+            if self.telegram_bot:
+                await self.telegram_bot.send_notification(
+                    f"📈 *ВІДКРИТО ПОЗИЦІЮ* (Scalp)\n"
+                    f"└ Пара: `{symbol}`\n"
+                    f"└ Ціна: `${current_price:.2f}`\n"
+                    f"└ SL: `${stop_loss_price:.2f}`\n"
+                    f"└ TP: `${take_profit_price:.2f}`\n"
+                    f"└ Розмір: `{quantity:.6f}`\n"
+                    f"└ Сигнал: {signal_type}",
+                    parse_mode='Markdown'
+                )
+
+            self.increment_daily_trades()
+            self.update_balance_for_drawdown()
+
+        finally:
+            self._opening_positions.discard(symbol)
 
     async def _close_position(self, symbol: str, reason: str, price: float):
-        # Захист від race condition: якщо WebSocket і analyze() одночасно спробують закрити
+        # Захист від дублювання закриття
+        if symbol in self._closing_positions:
+            logger.debug(f"[{symbol}] Вже закривається позиція, пропускаємо")
+            return
+
+        # Захист від race condition
         if symbol not in self.open_positions:
             logger.debug(f"[{symbol}] Позиція вже закрита (race condition захист)")
             return
 
-        position = self.open_positions.get(symbol)
-        if not position:
-            logger.warning(f"[{symbol}] Позиція не знайдена для закриття")
-            return
-
-        # Одразу видаляємо з open_positions щоб уникнути повторного виклику
-        del self.open_positions[symbol]
-
-        # Зберігаємо дані для chart після закриття
-        opened_at_str = position.get('opened_at')
-        if opened_at_str:
-            opened_at = datetime.fromisoformat(opened_at_str)
-        else:
-            opened_at = datetime.now()
-
-        await self._save_trade_chart_data(
-            position['order_id'],
-            symbol,
-            opened_at,
-            datetime.now()
-        )
+        self._closing_positions.add(symbol)
 
         try:
+            position = self.open_positions.get(symbol)
+            if not position:
+                logger.warning(f"[{symbol}] Позиція не знайдена для закриття")
+                return
+
+            # Одразу видаляємо з open_positions щоб уникнути повторного виклику
+            del self.open_positions[symbol]
+
+            # Зберігаємо дані для chart
+            opened_at_str = position.get('opened_at')
+            opened_at = datetime.fromisoformat(opened_at_str) if opened_at_str else datetime.now()
+
+            await self._save_trade_chart_data(
+                position['order_id'],
+                symbol,
+                opened_at,
+                datetime.now()
+            )
+
+            # ВИПРАВЛЕНО: правильний розрахунок PnL
             revenue = position['quantity'] * price
             cost = position['quantity'] * position['entry_price']
-            commission = revenue * 0.0018 + cost * 0.0018
+            commission_rate = 0.001  # 0.1% комісія Bybit
+            commission = (cost + revenue) * commission_rate
             pnl = revenue - cost - commission
+            pnl_percent = ((price - position['entry_price']) / position['entry_price'] - commission_rate * 2) * 100
 
             result = await self.exchange.create_order(symbol, 'sell', 'Market', position['quantity'], price)
 
@@ -851,7 +865,7 @@ class ScalpStrategy(BaseStrategy):
             else:
                 self.losing_trades += 1
 
-            # Оновлюємо статус ордера з ціною закриття
+            # Оновлюємо статус ордера
             with get_db() as conn:
                 conn.execute(
                     "UPDATE orders SET status = 'closed', closed_at = ?, closed_price = ?, pnl = ?, commission = ? WHERE order_id = ?",
@@ -863,13 +877,14 @@ class ScalpStrategy(BaseStrategy):
                 'stop_loss': '🛑 Stop Loss',
                 'trailing_stop': '📉 Trailing Stop',
                 'emergency_stop': '🛑 Екстрена зупинка',
-                'reset': '🔄 Скидання'
+                'reset': '🔄 Скидання',
+                'force_close': '🔒 Примусове закриття'
             }.get(reason, reason)
 
             add_log("INFO", self.name,
-                    f"📉 Закрито LONG позицію {symbol} @ ${price:.2f} | PnL: ${pnl:.2f} | {reason_text}")
+                    f"📉 Закрито LONG позицію {symbol} @ ${price:.2f} | PnL: ${pnl:.2f} ({pnl_percent:+.2f}%) | {reason_text}")
 
-            # Telegram сповіщення
+            # Telegram сповіщення (тільки одне, без дублювання)
             if self.telegram_bot:
                 pnl_icon = "✅" if pnl >= 0 else "❌"
                 await self.telegram_bot.send_notification(
@@ -877,16 +892,15 @@ class ScalpStrategy(BaseStrategy):
                     f"└ Пара: `{symbol}`\n"
                     f"└ Ціна входу: `${position['entry_price']:.2f}`\n"
                     f"└ Ціна виходу: `${price:.2f}`\n"
-                    f"└ PnL: {pnl_icon} `${pnl:.2f}`\n"
+                    f"└ PnL: {pnl_icon} `${pnl:.2f}` ({pnl_percent:+.2f}%)\n"
                     f"└ Причина: {reason_text}",
                     parse_mode='Markdown'
                 )
 
             self.update_balance_for_drawdown()
 
-        except Exception as e:
-            logger.error(f"Критична помилка при закритті позиції {symbol}: {e}")
-            add_log("ERROR", self.name, f"Критична помилка закриття {symbol}: {e}")
+        finally:
+            self._closing_positions.discard(symbol)
 
     async def calculate_bollinger_bands(self, prices: List[float], period: int = 20, std_dev: float = 2) -> Dict:
         """

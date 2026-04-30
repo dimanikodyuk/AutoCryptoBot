@@ -1456,51 +1456,120 @@
 
 		        // ============= СКАЛЬПІНГ =============
         async function loadScalpStrategy() {
-            try {
-                const response = await fetch('/api/scalp_status');
-                const data = await response.json();
-                if (data.error) { document.getElementById('scalpContent').innerHTML = `<div class="loading">${data.error}</div>`; return; }
+    try {
+        const response = await fetch('/api/scalp_status');
+        const data = await response.json();
+        if (data.error) {
+            document.getElementById('scalpContent').innerHTML = `<div class="loading">${data.error}</div>`;
+            return;
+        }
 
-                let positionsHtml = '';
-                if (data.open_positions && Object.keys(data.open_positions).length > 0) {
-                    positionsHtml = '<h3>📊 Активні позиції</h3>';
-                    for (const [symbol, pos] of Object.entries(data.open_positions)) {
-                        const currentPrice = data.current_price?.[symbol] || pos.entry_price;
-                        const pnlPercent = (currentPrice - pos.entry_price) / pos.entry_price * 100;
-                        const quantity = pos.quantity;
-                        const entryPrice = pos.entry_price;
-                        const currentPriceVal = currentPrice;
-                        const commissionRate = 0.0018;
-                        const buyCommission = quantity * entryPrice * commissionRate;
-                        const sellCommission = quantity * currentPriceVal * commissionRate;
-                        const totalCommission = buyCommission + sellCommission;
-                        const revenue = quantity * currentPriceVal;
-                        const cost = quantity * entryPrice;
-                        const realPnl = revenue - cost - totalCommission;
-                        const realPnlPercent = (realPnl / cost) * 100;
-                        const breakEvenMove = (totalCommission / cost) * 100;
-                        const tp08 = (quantity * entryPrice * 1.008) - cost - totalCommission;
-                        const tp10 = (quantity * entryPrice * 1.01) - cost - totalCommission;
+        let positionsHtml = '';
+        if (data.open_positions && Object.keys(data.open_positions).length > 0) {
+            positionsHtml = '<h3>📊 Активні позиції</h3>';
+            for (const [symbol, pos] of Object.entries(data.open_positions)) {
+                // Отримуємо актуальну поточну ціну
+                const currentPrice = data.current_price?.[symbol] || pos.entry_price;
+                const entryPrice = pos.entry_price;
+                const quantity = pos.quantity;
 
-                        positionsHtml += `
-                            <div class="scalp-position-card" id="pos_${symbol}" style="margin-bottom: 15px;">
-                                <div><strong>${symbol}</strong></div>
-                                <div>💰 Вхід: $${entryPrice.toFixed(2)}</div>
-                                <div>📊 Кількість: ${quantity.toFixed(6)}</div>
-                                <div>🔄 Поточна: $${currentPriceVal.toFixed(2)}</div>
-                                <div class="${pnlPercent >= 0 ? 'scalp-positive' : 'scalp-negative'}">📈 PnL (без комісії): ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}% ($${(revenue - cost).toFixed(2)})</div>
-                                <div class="${realPnl >= 0 ? 'scalp-positive' : 'scalp-negative'}" style="border-top: 1px solid #2a2a4a; margin-top: 8px; padding-top: 8px;">💰 РЕАЛЬНИЙ PnL (з комісією): ${realPnl >= 0 ? '✅' : '❌'} ${realPnl >= 0 ? '+' : ''}$${realPnl.toFixed(4)} (${realPnlPercent >= 0 ? '+' : ''}${realPnlPercent.toFixed(2)}%)</div>
-                                <div style="font-size: 11px; color: #888;">⚠️ Для беззбитковості потрібен рух: ${breakEvenMove.toFixed(2)}%</div>
-                                <div style="font-size: 11px; color: #888;">🎯 При TP 0.8%: $${tp08.toFixed(4)} | При TP 1.0%: $${tp10.toFixed(4)}</div>
-                                <button class="btn-small" onclick="forceCloseScalpPosition('${symbol}')" style="background: #dc3545; margin-top: 10px; width: 100%;">❌ Примусово закрити</button>
+                // Розрахунок реального PnL з урахуванням комісії
+                const commissionRate = 0.001; // 0.1% комісія Bybit
+
+                // PnL без комісії
+                const grossPnl = (currentPrice - entryPrice) * quantity;
+                const grossPnlPercent = (currentPrice - entryPrice) / entryPrice * 100;
+
+                // Комісія на вхід і вихід
+                const entryCommission = quantity * entryPrice * commissionRate;
+                const exitCommission = quantity * currentPrice * commissionRate;
+                const totalCommission = entryCommission + exitCommission;
+
+                // Реальний PnL з комісією
+                const realPnl = grossPnl - totalCommission;
+                const realPnlPercent = ((currentPrice - entryPrice) / entryPrice - commissionRate * 2) * 100;
+
+                // Для беззбитковості потрібен рух
+                const breakEvenMove = (totalCommission / (quantity * entryPrice)) * 100;
+
+                // Поточний TP та SL
+                const stopLoss = pos.stop_loss || entryPrice * (1 - (data.stop_loss_percent || 0.6) / 100);
+                const takeProfit = pos.take_profit || entryPrice * (1 + (data.take_profit_percent || 1.2) / 100);
+
+                // Відстань до TP/SL
+                const toTP = ((takeProfit - currentPrice) / currentPrice * 100).toFixed(2);
+                const toSL = ((currentPrice - stopLoss) / currentPrice * 100).toFixed(2);
+
+                positionsHtml += `
+                    <div class="scalp-position-card" id="pos_${symbol}" style="margin-bottom: 15px; border-left: 4px solid ${realPnl >= 0 ? '#00ff88' : '#ff4444'};">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                            <div><strong>💰 ${symbol}</strong></div>
+                            <div style="font-size: 12px; background: #0f0f1a; padding: 4px 12px; border-radius: 20px;">
+                                Відкрита: ${new Date(pos.opened_at).toLocaleTimeString()}
                             </div>
-                        `;
-                    }
-                } else {
-                    positionsHtml = '<div class="loading">Немає активних позицій</div>';
-                }
+                        </div>
 
-                let html = `<div class="settings-panel"><h3>⚡ Налаштування Скальпінг стратегії</h3><div class="settings-row">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 10px;">
+                            <div>
+                                <div style="font-size: 11px; color: #888;">💰 Ціна входу</div>
+                                <div style="font-size: 16px; font-weight: bold;">$${entryPrice.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 11px; color: #888;">🔄 Поточна ціна</div>
+                                <div style="font-size: 16px; font-weight: bold; color: #00d4ff;">$${currentPrice.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 11px; color: #888;">📊 Кількість</div>
+                                <div style="font-size: 14px;">${quantity.toFixed(6)}</div>
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #2a2a4a;">
+                            <div>
+                                <div style="font-size: 11px; color: #888;">📈 PnL (без комісії)</div>
+                                <div id="gross_pnl_${symbol}" class="${grossPnl >= 0 ? 'scalp-positive' : 'scalp-negative'}" style="font-size: 18px; font-weight: bold;">
+                                    ${grossPnl >= 0 ? '+' : ''}$${grossPnl.toFixed(4)} (${grossPnlPercent >= 0 ? '+' : ''}${grossPnlPercent.toFixed(2)}%)
+                                </div>
+                            </div>
+                            <div>
+                                <div style="font-size: 11px; color: #888;">💰 РЕАЛЬНИЙ PnL (з комісією)</div>
+                                <div id="real_pnl_${symbol}" class="${realPnl >= 0 ? 'scalp-positive' : 'scalp-negative'}" style="font-size: 18px; font-weight: bold;">
+                                    ${realPnl >= 0 ? '✅ +' : '❌ '}$${realPnl.toFixed(4)} (${realPnlPercent >= 0 ? '+' : ''}${realPnlPercent.toFixed(2)}%)
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; gap: 15px; margin-top: 10px; font-size: 12px;">
+                            <div style="flex: 1; background: #ff444422; border-radius: 8px; padding: 8px; text-align: center;">
+                                <div>🛑 Stop Loss</div>
+                                <div><strong>$${stopLoss.toFixed(2)}</strong></div>
+                                <div style="color: #ff8888;">▼ ${toSL > 0 ? toSL : '0'}% до SL</div>
+                            </div>
+                            <div style="flex: 1; background: #00ff8822; border-radius: 8px; padding: 8px; text-align: center;">
+                                <div>🎯 Take Profit</div>
+                                <div><strong>$${takeProfit.toFixed(2)}</strong></div>
+                                <div style="color: #88ff88;">▲ ${toTP > 0 ? toTP : '0'}% до TP</div>
+                            </div>
+                        </div>
+
+                        <div style="font-size: 11px; color: #888; margin-top: 10px; padding: 8px; background: #0f0f1a; border-radius: 8px;">
+                            ⚠️ Для беззбитковості потрібен рух: ${breakEvenMove.toFixed(2)}%
+                            (комісія: $${totalCommission.toFixed(4)})
+                        </div>
+
+                        <button class="btn-small" onclick="forceCloseScalpPosition('${symbol}')"
+                                style="background: #dc3545; margin-top: 10px; width: 100%;">
+                            ❌ Примусово закрити
+                        </button>
+                    </div>
+                `;
+            }
+        } else {
+            positionsHtml = '<div class="loading">Немає активних позицій</div>';
+        }
+
+        // Продовження HTML коду...
+        let html = `<div class="settings-panel"><h3>⚡ Налаштування Скальпінг стратегії</h3><div class="settings-row">
                     <label>Торгові пари:</label><input type="text" id="scalpSymbols" value="${(data.symbols || ['BTCUSDT']).join(',')}" style="width: 250px;">
                     <label>Таймфрейм:</label><select id="scalpTimeframe">
                         <option value="1" ${data.timeframe === '1' ? 'selected' : ''}>1 хвилина</option>
@@ -1510,8 +1579,8 @@
                         <option value="60" ${data.timeframe === '60' ? 'selected' : ''}>1 година</option>
                     </select>
                     <label>Розмір угоди (USDT):</label><input type="number" id="scalpTradeSize" value="${data.trade_size_usdt || 20}" min="5" max="100" step="5">
-                    <label>Профіт %:</label><input type="number" id="scalpTakeProfit" value="${data.take_profit_percent || 1.5}" step="0.1" min="0.1" max="3">
-                    <label>Стоп-лосс %:</label><input type="number" id="scalpStopLoss" value="${data.stop_loss_percent || 0.8}" step="0.1" min="0.1" max="2">
+                    <label>Профіт %:</label><input type="number" id="scalpTakeProfit" value="${data.take_profit_percent || 1.2}" step="0.1" min="0.1" max="3">
+                    <label>Стоп-лосс %:</label><input type="number" id="scalpStopLoss" value="${data.stop_loss_percent || 0.6}" step="0.1" min="0.1" max="2">
                     <button class="btn-save" onclick="updateScalpSettings()">💾 Зберегти</button>
                 </div></div>
                 <div class="stats-grid">
@@ -1531,10 +1600,17 @@
                     <button onclick="loadScalpOrders()">Застосувати</button>
                 </div>
                 <div class="orders-table" id="scalpOrdersTable"><div class="loading">Завантаження ордерів...</div></div>`;
-                document.getElementById('scalpContent').innerHTML = html;
-                loadScalpOrders();
-            } catch(e) { console.error(e); document.getElementById('scalpContent').innerHTML = '<div class="loading">Помилка завантаження</div>'; }
-        }
+        document.getElementById('scalpContent').innerHTML = html;
+        loadScalpOrders();
+
+        // Додаємо WebSocket для оновлення PnL в реальному часі
+        setupScalpPnLUpdater();
+
+    } catch(e) {
+        console.error(e);
+        document.getElementById('scalpContent').innerHTML = '<div class="loading">Помилка завантаження</div>';
+    }
+}
 
         async function loadScalpOrders() {
             const side = document.getElementById('scalpOrderSideFilter')?.value || 'all';
@@ -1580,6 +1656,71 @@
                 else alert('❌ Помилка: ' + (result.error || 'невідома'));
             } catch(e) { console.error(e); alert('❌ Помилка: ' + e.message); }
         }
+
+        let scalpUpdateInterval = null;
+
+function setupScalpPnLUpdater() {
+    if (scalpUpdateInterval) clearInterval(scalpUpdateInterval);
+    // Оновлюємо кожні 3 секунди
+    scalpUpdateInterval = setInterval(() => {
+        updateScalpPnL();
+    }, 3000);
+}
+
+async function updateScalpPnL() {
+    try {
+        const response = await fetch('/api/scalp_status');
+        const data = await response.json();
+
+        if (!data.open_positions || Object.keys(data.open_positions).length === 0) {
+            return;
+        }
+
+        const commissionRate = 0.001; // 0.1%
+
+        for (const [symbol, pos] of Object.entries(data.open_positions)) {
+            const currentPrice = data.current_price?.[symbol] || pos.entry_price;
+            const entryPrice = pos.entry_price;
+            const quantity = pos.quantity;
+
+            // Перевіряємо чи є картка позиції на сторінці
+            const card = document.getElementById(`pos_${symbol}`);
+            if (!card) continue;
+
+            // Розрахунки
+            const grossPnl = (currentPrice - entryPrice) * quantity;
+            const grossPnlPercent = (currentPrice - entryPrice) / entryPrice * 100;
+
+            const entryCommission = quantity * entryPrice * commissionRate;
+            const exitCommission = quantity * currentPrice * commissionRate;
+            const totalCommission = entryCommission + exitCommission;
+            const realPnl = grossPnl - totalCommission;
+            const realPnlPercent = ((currentPrice - entryPrice) / entryPrice - commissionRate * 2) * 100;
+
+            // Оновлюємо PnL в картці
+            const grossPnLElem = card.querySelector('.gross-pnl');
+            const realPnLElem = card.querySelector('.real-pnl');
+
+            if (grossPnLElem) {
+                grossPnLElem.innerHTML = `${grossPnl >= 0 ? '+' : ''}$${grossPnl.toFixed(4)} (${grossPnlPercent >= 0 ? '+' : ''}${grossPnlPercent.toFixed(2)}%)`;
+                grossPnLElem.className = grossPnl >= 0 ? 'scalp-positive' : 'scalp-negative';
+            }
+
+            if (realPnLElem) {
+                realPnLElem.innerHTML = `${realPnl >= 0 ? '✅ +' : '❌ '}$${realPnl.toFixed(4)} (${realPnlPercent >= 0 ? '+' : ''}${realPnlPercent.toFixed(2)}%)`;
+                realPnLElem.className = realPnl >= 0 ? 'scalp-positive' : 'scalp-negative';
+            }
+
+            // Оновлюємо поточну ціну
+            const priceElem = card.querySelector('.current-price');
+            if (priceElem) {
+                priceElem.innerHTML = `$${currentPrice.toFixed(2)}`;
+            }
+        }
+    } catch(e) {
+        console.error('Помилка оновлення PnL:', e);
+    }
+}
 
         async function forceCloseScalpPosition(symbol) {
             if (!confirm(`⚠️ Примусово закрити позицію ${symbol}?`)) return;
