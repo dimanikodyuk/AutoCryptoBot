@@ -8,7 +8,10 @@ from trading.strategies.grid import GridStrategy
 from trading.strategies.news import NewsStrategy
 from trading.strategies.scalp import ScalpStrategy
 from trading.strategies.signals import SignalStrategy
+from trading.strategies.tech_analysis import TechAnalysisStrategy
+
 from utils.logger_utils import setup_logger
+
 
 logger = setup_logger('engine')
 
@@ -101,7 +104,26 @@ class TradingEngine:
                     strategy.enabled = bool(s['enabled'])
                     self.strategies[s['id']] = strategy
                     logger.info(f"Завантажено Signals стратегію (id={s['id']}, enabled={strategy.enabled})")
- 
+
+
+
+                # В кінці списку стратегій, після signals, додайте:
+
+                elif s['name'] == 'tech_analysis':
+                    strategy = TechAnalysisStrategy(
+                        strategy_id=s['id'],
+                        name=s['name'],
+                        mode=self.config.DEFAULT_MODE,
+                        exchange=self.exchange
+                    )
+
+                    strategy.max_daily_drawdown = self.config.MAX_DAILY_DRAWDOWN
+                    strategy.max_daily_trades = self.config.MAX_DAILY_TRADES
+                    strategy.min_balance_for_trading = self.config.MIN_BALANCE_FOR_TRADING
+                    strategy.enabled = bool(s['enabled'])
+                    self.strategies[s['id']] = strategy
+                    logger.info(f"Завантажено TechAnalysis стратегію (id={s['id']}, enabled={strategy.enabled})")
+
         # Запуск WebSocket
         await self.exchange.start_websocket(self.config.SYMBOLS)
 
@@ -110,16 +132,10 @@ class TradingEngine:
     async def get_klines(self, symbol: str, interval: str, limit: int = 100) -> list:
         """Отримання свічок для аналізу"""
         try:
-            # Тут має бути реальний запит до Bybit API
-            # Для прикладу використовуємо існуючий метод або створюємо новий
-            if hasattr(self, 'bybit_client'):
-                klines = await self.bybit_client.get_kline(
-                    category="spot",
-                    symbol=symbol,
-                    interval=interval,
-                    limit=limit
-                )
-                return klines.get('list', [])
+            # Використовуємо існуючий метод exchange
+            if hasattr(self.exchange, 'get_klines'):
+                klines = await self.exchange.get_klines(symbol, interval, limit)
+                return klines
             return []
         except Exception as e:
             logger.error(f"Помилка отримання свічок для {symbol}: {e}")

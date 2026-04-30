@@ -18,8 +18,8 @@ from utils.logger_utils import setup_logger
 from monitoring.power_monitor import power_monitor
 
 # Імпорти для стратегії технічного аналізу
-from backend.strategies.tech_analysis_strategy import TechAnalysisStrategy
-from backend.api.routes_tech_analysis import tech_analysis_bp, init_tech_strategy
+#from backend.strategies.tech_analysis_strategy import TechAnalysisStrategy
+#from backend.api.routes_tech_analysis import tech_analysis_bp, init_tech_strategy
 
 logger = setup_logger('main')
 
@@ -32,7 +32,7 @@ class CryptoBot:
         self.flask_app = None
         self.flask_thread = None
         self.running = True
-        self.tech_strategy = None  # Стратегія технічного аналізу
+        #self.tech_strategy = None  # Стратегія технічного аналізу
         self.forecast_check_task = None  # Завдання перевірки прогнозів
 
     async def init(self):
@@ -62,8 +62,8 @@ class CryptoBot:
         # Ініціалізація стратегії технічного аналізу
         logger.info("📊 Ініціалізація стратегії технічного аналізу...")
         logger.info("📊 Ініціалізація стратегії технічного аналізу...")
-        self.tech_strategy = TechAnalysisStrategy(self.trading_engine.get_db())
-        await self.tech_strategy.initialize()
+        #self.tech_strategy = TechAnalysisStrategy(self.trading_engine.get_db())
+        #await self.tech_strategy.initialize()
 
         # Запускаємо WebSocket сервер в окремому потоці
         run_websocket_server(self.trading_engine, host='0.0.0.0', port=8765)
@@ -72,11 +72,11 @@ class CryptoBot:
         self.flask_app = create_flask_app(self.config, self.trading_engine)
 
         # Реєструємо blueprint для стратегії технічного аналізу
-        self.flask_app.register_blueprint(tech_analysis_bp)
+        #self.flask_app.register_blueprint(tech_analysis_bp)
 
         # Ініціалізуємо глобальний екземпляр стратегії для API
-        init_tech_strategy(self.tech_strategy)
-        logger.info("✅ API маршрути для технічного аналізу зареєстровано")
+        #(self.tech_strategy)
+        #logger.info("✅ API маршрути для технічного аналізу зареєстровано")
 
         self.flask_thread = threading.Thread(target=self._run_flask, daemon=True)
         self.flask_thread.start()
@@ -323,3 +323,26 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

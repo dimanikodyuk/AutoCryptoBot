@@ -31,6 +31,7 @@ class Signal:
     closed_at: Optional[datetime] = None
     total_pnl: float = 0.0
     partial_closes: List[dict] = field(default_factory=list)
+    error_message: Optional[str] = None  # Додано поле для помилок
 
 
 class SignalStrategy(BaseStrategy):
@@ -178,13 +179,14 @@ class SignalStrategy(BaseStrategy):
         with get_db() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO signals 
-                (id, symbol, signal_type, entry_price, entry_limit, stop_loss, 
-                 take_profits, trade_size_usdt, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, strategy_id, symbol, signal_type, entry_price, entry_limit, stop_loss, 
+                 take_profits, trade_size_usdt, status, created_at, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                signal.id, signal.symbol, signal.signal_type, signal.entry_price,
+                signal.id, self.strategy_id, signal.symbol, signal.signal_type, signal.entry_price,
                 signal.entry_limit, signal.stop_loss, ','.join(map(str, signal.take_profits)),
-                signal.trade_size_usdt, signal.status, signal.created_at.isoformat()
+                signal.trade_size_usdt, signal.status, signal.created_at.isoformat(),
+                signal.error_message
             ))
 
     def _save_order(self, order_id: str, symbol: str, side: str, price: float,
@@ -437,12 +439,57 @@ class SignalStrategy(BaseStrategy):
 
         return signal
 
+    async def check_symbol_supported(self, symbol: str) -> bool:
+        """Перевірка чи підтримується символ біржею - спрощена версія"""
+        try:
+            # Просто намагаємося отримати ціну - якщо помилка, то символ не підтримується
+            price = await self.exchange.get_current_price(symbol)
+            return price > 0
+        except Exception as e:
+            error_msg = str(e)
+            if 'Not supported symbols' in error_msg or '10001' in error_msg:
+                return False
+            logger.error(f"Помилка перевірки символу {symbol}: {e}")
+            return False
+
     async def _open_position(self, signal: Signal):
         """Відкриття позиції за сигналом"""
         try:
+            # ========== ПЕРЕВІРКА: чи підтримується символ біржею ==========
+            is_valid = await self.check_symbol_supported(signal.symbol)
+            if not is_valid:
+                error_msg = f"❌ Пара {signal.symbol} не підтримується Bybit"
+                logger.error(error_msg)
+
+                # Оновлюємо статус сигналу
+                signal.status = 'failed'
+                signal.error_message = error_msg
+                self._save_signal(signal)
+
+                if signal.id in self.pending_signals:
+                    del self.pending_signals[signal.id]
+
+                if self.telegram_bot:
+                    await self.telegram_bot.send_notification(
+                        f"⚠️ *НЕВДАЛОСЬ ВІДКРИТИ ПОЗИЦІЮ*\n"
+                        f"└ Пара: `{signal.symbol}`\n"
+                        f"└ Причина: {error_msg}\n"
+                        f"└ Використовуйте тільки пари, які підтримуються Bybit\n"
+                        f"└ Наприклад: BTCUSDT, ETHUSDT, SOLUSDT",
+                        parse_mode='Markdown'
+                    )
+                return
+            # ========== КІНЕЦЬ ПЕРЕВІРКИ ==========
+
             current_price = await self.exchange.get_current_price(signal.symbol)
             if current_price <= 0:
                 logger.error(f"[Signals] Не вдалося отримати ціну для {signal.symbol}")
+                # Позначаємо сигнал як failed якщо не вдалося отримати ціну
+                signal.status = 'failed'
+                signal.error_message = f"Не вдалося отримати ціну для {signal.symbol}"
+                self._save_signal(signal)
+                if signal.id in self.pending_signals:
+                    del self.pending_signals[signal.id]
                 return
 
             side = 'buy' if signal.signal_type == 'LONG' else 'sell'
@@ -450,15 +497,42 @@ class SignalStrategy(BaseStrategy):
             cost = quantity * current_price
 
             if self.available_balance < cost:
-                logger.warning(f"[Signals] Недостатньо балансу: потрібно ${cost:.2f}")
+                logger.warning(
+                    f"[Signals] Недостатньо балансу: потрібно ${cost:.2f}, доступно ${self.available_balance:.2f}")
+                signal.status = 'failed'
+                signal.error_message = f"Недостатньо балансу: потрібно ${cost:.2f}, доступно ${self.available_balance:.2f}"
+                self._save_signal(signal)
+                if signal.id in self.pending_signals:
+                    del self.pending_signals[signal.id]
                 return
+
+            # Перевіряємо чи можна створити ордер (мінімальна кількість)
+            try:
+                min_qty = await self.exchange.get_min_order_quantity(signal.symbol)
+                if quantity < min_qty:
+                    logger.warning(
+                        f"[Signals] Кількість {quantity:.8f} менша за мінімальну {min_qty:.8f} для {signal.symbol}")
+                    signal.status = 'failed'
+                    signal.error_message = f"Кількість {quantity:.8f} менша за мінімальну {min_qty:.8f}"
+                    self._save_signal(signal)
+                    if signal.id in self.pending_signals:
+                        del self.pending_signals[signal.id]
+                    return
+            except Exception as e:
+                logger.warning(f"Не вдалося перевірити min quantity для {signal.symbol}: {e}")
 
             order_result = await self.exchange.create_order(
                 signal.symbol, side, 'Market', quantity, current_price
             )
 
             if order_result.get('error'):
-                logger.error(f"[Signals] Помилка відкриття позиції: {order_result}")
+                error_msg = order_result.get('error', 'Невідома помилка')
+                logger.error(f"[Signals] Помилка відкриття позиції: {error_msg}")
+                signal.status = 'failed'
+                signal.error_message = f"Помилка біржі: {error_msg}"
+                self._save_signal(signal)
+                if signal.id in self.pending_signals:
+                    del self.pending_signals[signal.id]
                 return
 
             order_id = f"sig_order_{signal.id}"
@@ -472,16 +546,17 @@ class SignalStrategy(BaseStrategy):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     order_id, self.strategy_id, signal.symbol, side, current_price, quantity, 'open',
-                    'Market',  # ← ВИПРАВЛЕНО: 'Market' замість signal.signal_type
+                    'Market',
                     datetime.now().isoformat(),
                     signal.stop_loss,
                     ','.join(map(str, signal.take_profits)),
-                    signal.signal_type  # signal_type зберігається окремо
+                    signal.signal_type
                 ))
 
             signal.status = 'active'
             signal.order_id = order_id
             signal.entry_price = current_price
+            signal.error_message = None
             self.active_signals[signal.id] = signal
             if signal.id in self.pending_signals:
                 del self.pending_signals[signal.id]
@@ -505,7 +580,16 @@ class SignalStrategy(BaseStrategy):
             asyncio.create_task(self._monitor_position(signal))
 
         except Exception as e:
-            logger.error(f"[Signals] Помилка відкриття позиції: {e}")
+            error_msg = str(e)
+            logger.error(f"[Signals] Помилка відкриття позиції: {error_msg}")
+            try:
+                signal.status = 'failed'
+                signal.error_message = f"Виняток: {error_msg}"
+                self._save_signal(signal)
+                if signal.id in self.pending_signals:
+                    del self.pending_signals[signal.id]
+            except:
+                pass
 
     async def _monitor_position(self, signal: Signal):
         """Моніторинг відкритої позиції"""
@@ -671,6 +755,44 @@ class SignalStrategy(BaseStrategy):
 
     async def get_status(self) -> dict:
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades else 0
+
+        # Отримуємо failed сигнали з БД
+        failed_signals = []
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT id, symbol, signal_type, entry_price, stop_loss, take_profits, 
+                       created_at, error_message
+                FROM signals 
+                WHERE strategy_id = ? AND status = 'failed'
+                ORDER BY created_at DESC
+                LIMIT 20
+            """, (self.strategy_id,))
+            for row in cursor.fetchall():
+                failed_signals.append({
+                    'id': row['id'],
+                    'symbol': row['symbol'],
+                    'signal_type': row['signal_type'],
+                    'entry_price': float(row['entry_price']) if row['entry_price'] else 0,
+                    'stop_loss': float(row['stop_loss']) if row['stop_loss'] else 0,
+                    'take_profits': row['take_profits'].split(',') if row['take_profits'] else [],
+                    'created_at': row['created_at'],
+                    'error_message': row['error_message'] or ''
+                })
+
+        active_list = []
+        for s in self.active_signals.values():
+            active_list.append({
+                'id': s.id,
+                'symbol': s.symbol,
+                'type': s.signal_type,
+                'entry_price': float(s.entry_price),
+                'stop_loss': float(s.stop_loss),
+                'take_profits': [float(tp) for tp in s.take_profits],
+                'partial_closes': len(s.partial_closes),
+                'total_tp': len(s.take_profits),
+                'created_at': s.created_at.isoformat() if hasattr(s.created_at, 'isoformat') else str(s.created_at)
+            })
+
         return {
             'id': self.strategy_id,
             'name': self.name,
@@ -684,19 +806,8 @@ class SignalStrategy(BaseStrategy):
             'winning_trades': self.winning_trades,
             'losing_trades': self.losing_trades,
             'win_rate': round(win_rate, 1),
-            'active_signals': [
-                {
-                    'id': s.id,
-                    'symbol': s.symbol,
-                    'type': s.signal_type,
-                    'entry_price': s.entry_price,
-                    'stop_loss': s.stop_loss,
-                    'take_profits': s.take_profits,
-                    'partial_closes': len(s.partial_closes),
-                    'total_tp': len(s.take_profits)
-                }
-                for s in self.active_signals.values()
-            ],
+            'active_signals': active_list,
+            'failed_signals': failed_signals,
             'pending_signals': len(self.pending_signals),
             'daily_trades_count': self.daily_trades_count,
             'max_daily_trades': self.max_daily_trades,

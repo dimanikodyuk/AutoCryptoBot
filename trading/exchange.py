@@ -93,6 +93,62 @@ class BybitExchange:
                 await asyncio.sleep(1)
         return []
 
+    async def check_symbol_supported(self, symbol: str) -> bool:
+        """Перевірка чи підтримується символ біржею"""
+        try:
+            # Кешуємо список підтримуваних символів
+            if not hasattr(self, '_supported_symbols_cache'):
+                self._supported_symbols_cache = None
+                self._supported_symbols_time = 0
+
+            # Оновлюємо кеш раз на годину
+            import time
+            current_time = time.time()
+            if self._supported_symbols_cache is None or (current_time - self._supported_symbols_time) > 3600:
+                # ВИПРАВЛЕНО: використовуємо self._request замість self._make_request
+                try:
+                    response = await self._request('GET', '/v5/market/tickers', {'category': 'spot'})
+                    if response and 'result' in response and 'list' in response['result']:
+                        self._supported_symbols_cache = {item['symbol'] for item in response['result']['list']}
+                        self._supported_symbols_time = current_time
+                        logger.info(f"Завантажено {len(self._supported_symbols_cache)} підтримуваних символів")
+                    else:
+                        logger.warning("Не вдалося отримати список підтримуваних символів")
+                        return True
+                except Exception as e:
+                    logger.warning(f"Помилка отримання списку символів: {e}, пропускаємо перевірку")
+                    return True
+
+            return symbol in self._supported_symbols_cache
+        except Exception as e:
+            logger.error(f"Помилка перевірки символу {symbol}: {e}")
+            return True  # У разі помилки пропускаємо перевірку
+
+    async def get_min_order_quantity(self, symbol: str) -> float:
+        """Отримання мінімальної кількості для ордера"""
+        try:
+            # Кешуємо інформацію про символи
+            if not hasattr(self, '_symbols_info_cache'):
+                self._symbols_info_cache = {}
+
+            if symbol not in self._symbols_info_cache:
+                response = await self._make_request('GET', '/v5/market/instruments-info',
+                                                    {'category': 'spot', 'symbol': symbol})
+                if response and 'result' in response and 'list' in response['result']:
+                    for item in response['result']['list']:
+                        if item['symbol'] == symbol:
+                            lot_size_filter = item.get('lotSizeFilter', {})
+                            min_qty = float(lot_size_filter.get('minOrderQty', 0.00001))
+                            self._symbols_info_cache[symbol] = min_qty
+                            break
+                else:
+                    return 0.00001  # значення за замовчуванням
+
+            return self._symbols_info_cache.get(symbol, 0.00001)
+        except Exception as e:
+            logger.error(f"Помилка отримання min quantity для {symbol}: {e}")
+            return 0.00001
+
     async def get_real_balance(self, asset: str = 'USDT') -> float:
         """Отримання реального балансу з Bybit"""
         if not self.config.BYBIT_API_KEY or not self.config.BYBIT_API_SECRET:

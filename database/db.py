@@ -39,7 +39,13 @@ def init_db():
                 mode TEXT DEFAULT 'simulation',
                 drawdown_limit REAL DEFAULT 0.1,
                 config TEXT DEFAULT '{}',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                balance REAL DEFAULT 100.0,
+                total_pnl REAL DEFAULT 0.0,
+                total_trades INTEGER DEFAULT 0,
+                wins INTEGER DEFAULT 0,
+                losses INTEGER DEFAULT 0,
+                settings TEXT
             )
         ''')
         # Таблиця історії сентименту новин
@@ -72,6 +78,7 @@ def init_db():
                 opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 closed_at TIMESTAMP,
                 closed_price REAL,
+                signal_type TEXT,
                 FOREIGN KEY (strategy_id) REFERENCES strategies(id)
             )
         ''')
@@ -179,6 +186,7 @@ def init_db():
                 created_at TIMESTAMP,
                 closed_at TIMESTAMP,
                 total_pnl REAL DEFAULT 0,
+                error_message TEXT,
                 FOREIGN KEY (strategy_id) REFERENCES strategies(id)
             )
         ''')

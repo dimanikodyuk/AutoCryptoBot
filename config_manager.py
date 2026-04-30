@@ -27,9 +27,23 @@ DEFAULT_SETTINGS = {
         "timeframe": "1",
         "enabled": False
     },
+    "signals": {
+        "symbols": [],
+        "trade_size_usdt": 20,
+        "enabled": False
+    },
+    "tech_analysis": {  # НОВА СТРАТЕГІЯ
+        "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+        "trade_size_percent": 50,
+        "take_profit_percent": 4.0,
+        "stop_loss_percent": 2.0,
+        "min_confidence": 65.0,
+        "timeframe": "60",
+        "enabled": False
+    },
     "dashboard": {
         "display_symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"],
-        "refresh_interval": 1000,  # мс
+        "refresh_interval": 1000,
         "show_24h_change": True
     }
 }
@@ -40,6 +54,7 @@ def load_settings():
         try:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
+                # Додаємо нові стратегії якщо їх немає
                 for key in DEFAULT_SETTINGS:
                     if key not in settings:
                         settings[key] = DEFAULT_SETTINGS[key].copy()

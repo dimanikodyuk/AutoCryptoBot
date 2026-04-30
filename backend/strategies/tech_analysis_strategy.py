@@ -28,8 +28,8 @@ class TechAnalysisStrategy:
     Аналізує 3 таймфрейми (1D, 4H, 1H) для прийняття рішень
     """
 
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, db_connection):
+        self.db = db_connection
         self.name = "tech_analysis"
         self.enabled = False
         self.balance = 100.0
@@ -64,45 +64,67 @@ class TechAnalysisStrategy:
     async def load_settings(self):
         """Завантаження налаштувань з БД"""
         try:
-            cursor = self.db.cursor()
+            # ВАЖЛИВО: self.db може бути контекстним менеджером, а не з'єднанням
+            if self.db is None:
+                logger.warning("TechAnalysisStrategy: db is None, пропускаємо завантаження налаштувань")
+                return
+
+            # Перевіряємо чи є метод cursor()
+            if hasattr(self.db, 'cursor'):
+                cursor = self.db.cursor()
+            else:
+                # Якщо self.db це контекстний менеджер, використовуємо with
+                with self.db as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT * FROM strategies WHERE name = ?", (self.name,))
+                    strategy = cursor.fetchone()
+
+                    if strategy:
+                        self._load_from_row(strategy)
+                    return
+
             cursor.execute("SELECT * FROM strategies WHERE name = ?", (self.name,))
             strategy = cursor.fetchone()
 
             if strategy:
-                self.enabled = bool(strategy.get('enabled', False))
-                self.balance = float(strategy.get('balance', 100.0))
-                self.total_pnl = float(strategy.get('total_pnl', 0.0))
-                self.total_trades = strategy.get('total_trades', 0)
-                self.wins = strategy.get('wins', 0)
-                self.losses = strategy.get('losses', 0)
-                self.win_rate = (self.wins / self.total_trades * 100) if self.total_trades > 0 else 0.0
-
-                # Завантаження налаштувань
-                settings = strategy.get('settings', {})
-                if settings:
-                    self.symbols = settings.get('symbols', self.symbols)
-                    self.trade_size_percent = settings.get('trade_size_percent', 50.0)
-                    self.stop_loss_percent = settings.get('stop_loss_percent', 2.0)
-                    self.take_profit_percent = settings.get('take_profit_percent', 4.0)
-                    self.min_confidence = settings.get('min_confidence', 65.0)
-
-            # Завантаження активних прогнозів
-            cursor.execute("""
-                SELECT * FROM forecasts 
-                WHERE status = 'active' AND strategy = ?
-                ORDER BY created_at DESC
-            """, (self.name,))
-            self.forecasts = cursor.fetchall()
+                self._load_from_row(strategy)
 
         except Exception as e:
             logger.error(f"Помилка завантаження налаштувань: {e}")
 
+    def _load_from_row(self, strategy):
+        """Завантаження даних з рядка БД"""
+        try:
+            self.enabled = bool(strategy.get('enabled', False))
+            self.balance = float(strategy.get('balance', 100.0))
+            self.total_pnl = float(strategy.get('total_pnl', 0.0))
+            self.total_trades = strategy.get('total_trades', 0)
+            self.wins = strategy.get('wins', 0)
+            self.losses = strategy.get('losses', 0)
+            self.win_rate = (self.wins / self.total_trades * 100) if self.total_trades > 0 else 0.0
+
+            # Завантаження налаштувань
+            settings = strategy.get('settings', {})
+            if settings:
+                if isinstance(settings, str):
+                    import json
+                    settings = json.loads(settings)
+                self.symbols = settings.get('symbols', self.symbols)
+                self.trade_size_percent = settings.get('trade_size_percent', 50.0)
+                self.stop_loss_percent = settings.get('stop_loss_percent', 2.0)
+                self.take_profit_percent = settings.get('take_profit_percent', 4.0)
+                self.min_confidence = settings.get('min_confidence', 65.0)
+        except Exception as e:
+            logger.error(f"Помилка завантаження даних стратегії: {e}")
+
     async def save_settings(self, settings: dict):
         """Збереження налаштувань"""
         try:
-            cursor = self.db.cursor()
+            if self.db is None:
+                logger.warning("TechAnalysisStrategy: db is None, не можу зберегти налаштування")
+                return False
 
-            # Оновлюємо налаштування
+            # Оновлюємо налаштування в пам'яті
             if 'symbols' in settings:
                 self.symbols = settings['symbols']
             if 'trade_size_percent' in settings:
@@ -114,13 +136,26 @@ class TechAnalysisStrategy:
             if 'min_confidence' in settings:
                 self.min_confidence = settings['min_confidence']
 
-            cursor.execute("""
-                UPDATE strategies 
-                SET settings = ? 
-                WHERE name = ?
-            """, (self.get_settings_dict(), self.name))
+            import json
+            settings_json = json.dumps(self.get_settings_dict())
 
-            self.db.commit()
+            # Оновлюємо в БД
+            if hasattr(self.db, 'cursor'):
+                cursor = self.db.cursor()
+                cursor.execute("""
+                    UPDATE strategies 
+                    SET settings = ? 
+                    WHERE name = ?
+                """, (settings_json, self.name))
+                self.db.commit()
+            else:
+                with self.db as conn:
+                    conn.execute("""
+                        UPDATE strategies 
+                        SET settings = ? 
+                        WHERE name = ?
+                    """, (settings_json, self.name))
+
             logger.info("Налаштування TechAnalysisStrategy збережено")
             return True
 
@@ -203,7 +238,6 @@ class TechAnalysisStrategy:
 
             # RSI аналіз
             rsi_1h = indicators['1H'].get('rsi', 50)
-            rsi_4h = indicators['4H'].get('rsi', 50)
 
             if rsi_1h < 30:
                 trend_score += 1.5
@@ -256,7 +290,7 @@ class TechAnalysisStrategy:
 
             # Визначення сигналу
             atr = indicators['1H'].get('atr', current_price * 0.01)
-            target_offset = atr * 2.5  # Ціль = ATR * 2.5
+            target_offset = atr * 2.5
 
             if confidence >= self.min_confidence:
                 if trend_score > 2:
@@ -464,28 +498,40 @@ class TechAnalysisStrategy:
                               current_price: float, confidence: float, explanation: List[str]):
         """Створення прогнозу в БД"""
         try:
-            cursor = self.db.cursor()
+            if self.db is None:
+                logger.warning("TechAnalysisStrategy: db is None, не можу створити прогноз")
+                return
 
-            # Визначаємо прогнозований час (від 1 до 24 годин)
             forecast_hours = random.randint(1, 24)
             expires_at = datetime.now() + timedelta(hours=forecast_hours)
 
-            cursor.execute("""
-                INSERT INTO forecasts (
-                    strategy, symbol, signal_type, entry_price, target_price,
-                    confidence, explanation, status, created_at, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                self.name, symbol, signal, current_price, target_price,
-                confidence, '\n'.join(explanation), ForecastStatus.ACTIVE.value,
-                datetime.now(), expires_at
-            ))
+            if hasattr(self.db, 'cursor'):
+                cursor = self.db.cursor()
+                cursor.execute("""
+                    INSERT INTO forecasts (
+                        strategy, symbol, signal_type, entry_price, target_price,
+                        confidence, explanation, status, created_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    self.name, symbol, signal, current_price, target_price,
+                    confidence, '\n'.join(explanation), ForecastStatus.ACTIVE.value,
+                    datetime.now(), expires_at
+                ))
+                self.db.commit()
+            else:
+                with self.db as conn:
+                    conn.execute("""
+                        INSERT INTO forecasts (
+                            strategy, symbol, signal_type, entry_price, target_price,
+                            confidence, explanation, status, created_at, expires_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        self.name, symbol, signal, current_price, target_price,
+                        confidence, '\n'.join(explanation), ForecastStatus.ACTIVE.value,
+                        datetime.now(), expires_at
+                    ))
 
-            self.db.commit()
             logger.info(f"Створено прогноз для {symbol}: {signal} до ${target_price:.2f}")
-
-            # Оновлюємо локальний кеш
-            await self.load_settings()
 
         except Exception as e:
             logger.error(f"Помилка створення прогнозу: {e}")
@@ -493,15 +539,24 @@ class TechAnalysisStrategy:
     async def check_forecasts(self):
         """Перевірка активних прогнозів (чи збулися/прострочені)"""
         try:
-            cursor = self.db.cursor()
+            if self.db is None:
+                return
 
-            # Отримуємо активні прогнози
-            cursor.execute("""
-                SELECT * FROM forecasts 
-                WHERE status = 'active' AND strategy = ?
-            """, (self.name,))
+            if hasattr(self.db, 'cursor'):
+                cursor = self.db.cursor()
+                cursor.execute("""
+                    SELECT * FROM forecasts 
+                    WHERE status = 'active' AND strategy = ?
+                """, (self.name,))
+                forecasts = cursor.fetchall()
+            else:
+                with self.db as conn:
+                    cursor = conn.execute("""
+                        SELECT * FROM forecasts 
+                        WHERE status = 'active' AND strategy = ?
+                    """, (self.name,))
+                    forecasts = cursor.fetchall()
 
-            forecasts = cursor.fetchall()
             current_prices = await self._get_current_prices()
 
             for forecast in forecasts:
@@ -514,13 +569,11 @@ class TechAnalysisStrategy:
                 if current == 0:
                     continue
 
-                # Перевірка на прострочення
                 expires_at = datetime.fromisoformat(forecast['expires_at'])
                 if datetime.now() > expires_at:
                     status = ForecastStatus.EXPIRED.value
                     success = False
                 else:
-                    # Перевірка чи досягнуто ціль
                     if signal == SignalType.LONG.value and current >= target:
                         status = ForecastStatus.SUCCESS.value
                         success = True
@@ -528,16 +581,24 @@ class TechAnalysisStrategy:
                         status = ForecastStatus.SUCCESS.value
                         success = True
                     else:
-                        continue  # Ще не збувся
+                        continue
 
-                # Оновлюємо статус прогнозу
-                cursor.execute("""
-                    UPDATE forecasts 
-                    SET status = ?, resolved_at = ?, resolved_price = ?, success = ?
-                    WHERE id = ?
-                """, (status, datetime.now(), current, 1 if success else 0, forecast['id']))
+                if hasattr(self.db, 'cursor'):
+                    cursor = self.db.cursor()
+                    cursor.execute("""
+                        UPDATE forecasts 
+                        SET status = ?, resolved_at = ?, resolved_price = ?, success = ?
+                        WHERE id = ?
+                    """, (status, datetime.now(), current, 1 if success else 0, forecast['id']))
+                    self.db.commit()
+                else:
+                    with self.db as conn:
+                        conn.execute("""
+                            UPDATE forecasts 
+                            SET status = ?, resolved_at = ?, resolved_price = ?, success = ?
+                            WHERE id = ?
+                        """, (status, datetime.now(), current, 1 if success else 0, forecast['id']))
 
-                self.db.commit()
                 logger.info(f"Прогноз для {symbol} {'збувся' if success else 'не збувся'}")
 
         except Exception as e:
@@ -545,42 +606,42 @@ class TechAnalysisStrategy:
 
     async def _get_current_prices(self) -> Dict[str, float]:
         """Отримання поточних цін для символів"""
-        # Тут має бути запит до вашого API Bybit
-        # Для прикладу повертаємо заглушку
         return {symbol: 50000.0 for symbol in self.symbols}
 
     async def execute_trade(self, symbol: str, signal: str, price: float, size_usdt: float):
         """Виконання угоди (віртуально)"""
         try:
-            cursor = self.db.cursor()
+            if self.db is None:
+                logger.warning("TechAnalysisStrategy: db is None, не можу виконати угоду")
+                return
 
-            # Розрахунок кількості
             quantity = size_usdt / price
 
-            # Створюємо ордер
-            cursor.execute("""
-                INSERT INTO orders (
-                    strategy_id, symbol, side, price, quantity, status, opened_at
-                ) VALUES (
-                    (SELECT id FROM strategies WHERE name = ?), ?, ?, ?, ?, 'open', ?
-                )
-            """, (self.name, symbol, 'buy' if signal == SignalType.LONG.value else 'sell',
-                  price, quantity, datetime.now()))
+            if hasattr(self.db, 'cursor'):
+                cursor = self.db.cursor()
+                cursor.execute("""
+                    INSERT INTO orders (
+                        strategy_id, symbol, side, price, quantity, status, opened_at
+                    ) VALUES (
+                        (SELECT id FROM strategies WHERE name = ?), ?, ?, ?, ?, 'open', ?
+                    )
+                """, (self.name, symbol, 'buy' if signal == SignalType.LONG.value else 'sell',
+                      price, quantity, datetime.now()))
+                self.db.commit()
+            else:
+                with self.db as conn:
+                    conn.execute("""
+                        INSERT INTO orders (
+                            strategy_id, symbol, side, price, quantity, status, opened_at
+                        ) VALUES (
+                            (SELECT id FROM strategies WHERE name = ?), ?, ?, ?, ?, 'open', ?
+                        )
+                    """, (self.name, symbol, 'buy' if signal == SignalType.LONG.value else 'sell',
+                          price, quantity, datetime.now()))
 
-            # Блокуємо кошти
             self.locked_balance += size_usdt
             self.balance -= size_usdt
 
-            # Оновлюємо баланс в БД
-            cursor.execute("""
-                UPDATE strategies 
-                SET balance = ?, locked_balance = ?
-                WHERE name = ?
-            """, (self.balance, self.locked_balance, self.name))
-
-            self.db.commit()
-
-            # Зберігаємо позицію
             self.active_positions[symbol] = {
                 'entry_price': price,
                 'quantity': quantity,

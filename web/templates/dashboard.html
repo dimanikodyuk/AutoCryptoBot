@@ -351,33 +351,64 @@
 
     <div class="container">
         <!-- Дашборд -->
-        <div id="tab-dashboard" class="tab-content active">
-            <div class="prices-widget" id="pricesWidget">
-                <div class="prices-header">
-                    <h3>💰 Поточні ціни криптовалют</h3>
-                    <div class="prices-settings">
-                        <button onclick="openPricesSettings()" class="btn-small" style="background: #2a2a4a; padding: 6px 12px; font-size: 12px;">⚙️ Налаштувати</button>
-                        <button onclick="refreshPrices()" class="btn-small btn-refresh" style="padding: 6px 12px; font-size: 12px;">🔄</button>
-                    </div>
-                </div>
-                <div class="prices-grid" id="pricesGrid"><div class="loading">Завантаження цін...</div></div>
-            </div>
-
-            <div class="stats-grid" id="globalStats">
-                <div class="stat-card"><div class="stat-value" id="totalPnl">$0</div><div class="stat-label">Загальний PnL</div></div>
-                <div class="stat-card"><div class="stat-value" id="totalBalance">$0</div><div class="stat-label">Загальний баланс</div></div>
-                <div class="stat-card"><div class="stat-value" id="activeStrategies">0</div><div class="stat-label">Активні стратегії</div></div>
-                <div class="stat-card"><div class="stat-value" id="totalTrades">0</div><div class="stat-label">Всього угод</div></div>
-            </div>
-
-            <div class="strategies-grid" id="strategiesContainer"><div class="loading">Завантаження...</div></div>
-
-            <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
-                <button class="btn-danger" onclick="emergencyStop()">🛑 ЕКСТРЕНА ЗУПИНКА</button>
-                <button class="btn-refresh" onclick="loadAllData()">🔄 Оновити</button>
-                <button onclick="resetAllStrategies()" style="background: #ff8800;">🔄 Скинути всі</button>
+        <!-- Дашборд -->
+<div id="tab-dashboard" class="tab-content active">
+    <div class="prices-widget" id="pricesWidget">
+        <div class="prices-header">
+            <h3>💰 Поточні ціни криптовалют</h3>
+            <div class="prices-settings">
+                <button onclick="openPricesSettings()" class="btn-small" style="background: #2a2a4a; padding: 6px 12px; font-size: 12px;">⚙️ Налаштувати</button>
+                <button onclick="refreshPrices()" class="btn-small btn-refresh" style="padding: 6px 12px; font-size: 12px;">🔄</button>
             </div>
         </div>
+        <div class="prices-grid" id="pricesGrid"><div class="loading">Завантаження цін...</div></div>
+    </div>
+
+    <div class="stats-grid" id="globalStats">
+        <div class="stat-card"><div class="stat-value" id="totalPnl">$0</div><div class="stat-label">Загальний PnL</div></div>
+        <div class="stat-card"><div class="stat-value" id="totalBalance">$0</div><div class="stat-label">Загальний баланс</div></div>
+        <div class="stat-card"><div class="stat-value" id="activeStrategies">0</div><div class="stat-label">Активні стратегії</div></div>
+        <div class="stat-card"><div class="stat-value" id="totalTrades">0</div><div class="stat-label">Всього угод</div></div>
+    </div>
+
+    <div class="strategies-grid" id="strategiesContainer"><div class="loading">Завантаження...</div></div>
+
+    <!-- Блок керування стратегією Технічного аналізу (стилізований як strategy-card) -->
+    <div id="taDashboardCard" class="strategy-card" style="margin-top: 20px; border-left-color: #9b59b6;">
+        <div class="strategy-header">
+            <span class="strategy-name">📊 ТЕХНІЧНИЙ АНАЛІЗ</span>
+            <span id="taQuickStatus" class="strategy-status status-inactive">❌ Зупинено</span>
+        </div>
+        <div class="strategy-stats">
+            <div class="strategy-stat">
+                <div class="strategy-stat-value" id="taQuickAccuracy">0%</div>
+                <div class="strategy-stat-label">Точність прогнозів</div>
+            </div>
+            <div class="strategy-stat">
+                <div class="strategy-stat-value" id="taQuickActive">0</div>
+                <div class="strategy-stat-label">Активні прогнози</div>
+            </div>
+            <div class="strategy-stat">
+                <div class="strategy-stat-value" id="taQuickPnl">$0</div>
+                <div class="strategy-stat-label">PnL</div>
+            </div>
+            <div class="strategy-stat">
+                <div class="strategy-stat-value" id="taQuickWinRate">0%</div>
+                <div class="strategy-stat-label">Win Rate</div>
+            </div>
+        </div>
+        <div class="strategy-actions">
+            <button class="btn-toggle" id="taQuickToggleBtn" onclick="quickToggleTechAnalysis()" style="background: #28a745;">✅ Запустити</button>
+            <button class="btn-reset" onclick="quickResetTechAnalysis()" style="background: #ff8800;">🔄 Скинути</button>
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
+        <button class="btn-danger" onclick="emergencyStop()">🛑 ЕКСТРЕНА ЗУПИНКА</button>
+        <button class="btn-refresh" onclick="loadAllData()">🔄 Оновити</button>
+        <button onclick="resetAllStrategies()" style="background: #ff8800;">🔄 Скинути всі</button>
+    </div>
+</div>
 
         <!-- Модальне вікно налаштувань цін -->
         <div id="pricesSettingsModal" class="modal">
@@ -681,7 +712,6 @@
         </div>
 
         <!-- Вкладка Технічний Аналіз -->
-        <!-- Вкладка Технічний Аналіз -->
         <div id="tab-tech-analysis" class="tab-content">
             <!-- Панель налаштувань -->
             <div class="settings-panel">
@@ -769,6 +799,28 @@
             <div class="chart-card">
                 <h3>📊 Точність прогнозів за останні 30 днів</h3>
                 <div id="taAccuracyChart" style="height: 350px;"></div>
+            </div>
+
+            <!-- Угоди технічного аналізу -->
+            <div style="margin-top: 30px;">
+                <h3>📋 Угоди технічного аналізу</h3>
+                <div class="filter-bar">
+                    <select id="taOrdersSideFilter">
+                        <option value="all">Всі сторони</option>
+                        <option value="buy">Купівля</option>
+                        <option value="sell">Продаж</option>
+                    </select>
+                    <select id="taOrdersStatusFilter">
+                        <option value="all">Всі статуси</option>
+                        <option value="open">Відкриті</option>
+                        <option value="closed">Закриті</option>
+                    </select>
+                    <input type="number" id="taOrdersLimit" placeholder="Кількість" value="20" style="width: 80px;">
+                    <button onclick="loadTechAnalysisOrders()">📋 Завантажити</button>
+                </div>
+                <div id="taOrdersTable" class="orders-table">
+                    <div class="loading">Завантаження угод...</div>
+                </div>
             </div>
 
             <!-- Кнопки керування -->
@@ -926,7 +978,7 @@
                 if (tabName === 'grid') loadGridStrategy();
                 if (tabName === 'scalp') loadScalpStrategy();
                 if (tabName === 'news') loadNewsStrategy();
-                if (tabName === 'tech-analysis') { loadTechAnalysisStatus(); loadTechChart(); loadTechForecasts(); }
+                if (tabName === 'tech-analysis') { loadTechAnalysisStatus(); loadTechChart(); loadTechForecasts(); loadTechAnalysisOrders();}
                 if (tabName === 'signals') refreshSignalsData();
                 if (tabName === 'database') loadDatabaseInfo();
                 if (tabName === 'logs') { loadLogModules(); loadLogSettings(); loadLogs(); }
@@ -939,7 +991,7 @@
 
         // ============= Допоміжні функції =============
         function escapeHtml(text) { if (!text) return ''; const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
-        async function loadAllData() { await loadStrategies(); }
+        async function loadAllData() { await loadStrategies();  await loadTechAnalysisQuickStatus();}
 
         // ============= Стратегії =============
         async function loadStrategies() {
@@ -2745,7 +2797,7 @@ async function updateScalpPnL() {
         const response = await fetch('/api/signals/status');
         const status = await response.json();
 
-        console.log('📡 Signals status:', status);  // Додайте для діагностики
+        console.log('📡 Signals status:', status);
 
         if (document.getElementById('signalsBalance'))
             document.getElementById('signalsBalance').innerHTML = `$${(status.balance || 0).toFixed(2)}`;
@@ -2767,46 +2819,91 @@ async function updateScalpPnL() {
 
         const activeTable = document.getElementById('activeSignalsTable');
         if (activeTable) {
-            // Перевіряємо різні можливі формати даних
-            let activeSignals = status.active_signals || status.signals || [];
+            let activeSignals = status.active_signals || [];
+            let failedSignals = status.failed_signals || [];
 
-            if (activeSignals.length > 0) {
-                let html = `<table><thead>——
-                            <th>Час</th>
-                            <th>Пара</th>
-                            <th>Тип</th>
-                            <th>Entry</th>
-                            <th>SL</th>
-                            <th>TP</th>
-                            <th>Стан</th>
-                            <th>Дія</th>
-                        </tr></thead><tbody>`;
+            if (activeSignals.length > 0 || failedSignals.length > 0) {
+                // ВИПРАВЛЕНО: правильна структура таблиці
+                let html = `
+                    <div class="orders-table">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #0f0f1a; border-bottom: 2px solid #2a2a4a;">
+                                    <th style="padding: 14px; text-align: left;">Час</th>
+                                    <th style="padding: 14px; text-align: left;">Пара</th>
+                                    <th style="padding: 14px; text-align: left;">Тип</th>
+                                    <th style="padding: 14px; text-align: left;">Entry</th>
+                                    <th style="padding: 14px; text-align: left;">SL</th>
+                                    <th style="padding: 14px; text-align: left;">TP</th>
+                                    <th style="padding: 14px; text-align: left;">Прогрес</th>
+                                    <th style="padding: 14px; text-align: left;">Статус</th>
+                                    <th style="padding: 14px; text-align: left;">Дія</th>
+                                </td>
+                            </thead>
+                            <tbody>
+                `;
 
+                // Активні сигнали
                 for (const s of activeSignals) {
-                    // Підтримка різних форматів даних
                     const signalId = s.id || s.signal_id;
                     const symbol = s.symbol;
                     const signalType = s.type || s.signal_type;
                     const entryPrice = s.entry_price;
                     const stopLoss = s.stop_loss;
-                    const takeProfits = s.take_profits || [];
+                    let takeProfits = s.take_profits || [];
+                    if (!Array.isArray(takeProfits) && typeof takeProfits === 'string') {
+                        takeProfits = takeProfits.split(',').map(tp => parseFloat(tp));
+                    }
                     const partialCloses = s.partial_closes || 0;
                     const totalTp = s.total_tp || takeProfits.length;
 
                     html += `
                         <tr style="border-bottom: 1px solid #2a2a4a;">
-                            <td style="padding: 12px;">${new Date(s.created_at || Date.now()).toLocaleTimeString()}<tr>
-                            <td style="padding: 12px;"><strong>${symbol}</strong></td>
+                            <td style="padding: 12px;">${new Date(s.created_at || Date.now()).toLocaleTimeString()}</td>
+                            <td style="padding: 12px; font-weight: bold;">${symbol}</td>
                             <td style="padding: 12px;" class="${signalType === 'LONG' ? 'buy' : 'sell'}">${signalType === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</td>
                             <td style="padding: 12px;">$${parseFloat(entryPrice).toFixed(8)}</td>
                             <td style="padding: 12px;" class="sell">$${parseFloat(stopLoss).toFixed(8)}</td>
                             <td style="padding: 12px;">${takeProfits.slice(0,3).map(tp => `$${parseFloat(tp).toFixed(8)}`).join('<br>')}</td>
                             <td style="padding: 12px;">🎯 ${partialCloses}/${totalTp}</td>
+                            <td style="padding: 12px;"><span style="color: #00ff88;">✅ Активний</span></td>
                             <td style="padding: 12px;"><button class="btn-small" style="background:#dc3545;" onclick="closeSignal('${signalId}')">❌ Закрити</button></td>
                         </tr>
                     `;
                 }
-                html += `</tbody></table>`;
+
+                // Невдалі сигнали
+                for (const s of failedSignals) {
+                    const signalId = s.id || s.signal_id;
+                    const symbol = s.symbol;
+                    const signalType = s.type || s.signal_type;
+                    const entryPrice = s.entry_price;
+                    const stopLoss = s.stop_loss;
+                    let takeProfits = s.take_profits || [];
+                    if (!Array.isArray(takeProfits) && typeof takeProfits === 'string') {
+                        takeProfits = takeProfits.split(',').map(tp => parseFloat(tp));
+                    }
+                    const errorMsg = s.error_message || 'Невідома помилка';
+
+                    html += `
+                        <tr style="border-bottom: 1px solid #2a2a4a; background: #ff444422;">
+                            <td style="padding: 12px;">${new Date(s.created_at).toLocaleTimeString()}</td>
+                            <td style="padding: 12px; font-weight: bold;">${symbol} <span style="color:#ff8888; font-size:10px;">⚠️</span></td>
+                            <td style="padding: 12px;" class="${signalType === 'LONG' ? 'buy' : 'sell'}">${signalType === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</td>
+                            <td style="padding: 12px;">$${parseFloat(entryPrice).toFixed(8)}</td>
+                            <td style="padding: 12px;" class="sell">$${parseFloat(stopLoss).toFixed(8)}</td>
+                            <td style="padding: 12px;">${takeProfits.slice(0,3).map(tp => `$${parseFloat(tp).toFixed(8)}`).join('<br>')}</td>
+                            <td style="padding: 12px;">❌ Помилка</td>
+                            <td style="padding: 12px;" colspan="2"><span style="color: #ff8888;" title="${errorMsg}">⚠️ ${errorMsg.length > 40 ? errorMsg.substring(0,40)+'...' : errorMsg}</span></td>
+                        </tr>
+                    `;
+                }
+
+                html += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
                 activeTable.innerHTML = html;
             } else {
                 activeTable.innerHTML = '<div class="loading">Немає активних сигналів</div>';
@@ -2864,31 +2961,68 @@ async function updateScalpPnL() {
         }
 
         async function loadSignalsHistory() {
-            const limit = document.getElementById('signalsHistoryLimit')?.value || 50;
-            try {
-                const response = await fetch(`/api/signals/history?limit=${limit}`);
-                const signals = await response.json();
-                const table = document.getElementById('signalsHistoryTable');
-                if (!signals || signals.length === 0) { if (table) table.innerHTML = '<div class="loading">Немає історії сигналів</div>'; return; }
-                let html = `<table><thead><tr><th>Час</th><th>Пара</th><th>Тип</th><th>Entry</th><th>SL</th><th>TP</th><th>Статус</th><th>PnL</th></tr></thead><tbody>`;
-                for (const s of signals) {
-                    const pnl = parseFloat(s.total_pnl || s.pnl || 0);
-                    const statusText = s.status === 'closed' ? '✅ Закрито' : (s.status === 'active' ? '🟢 Активний' : '⏳ Очікує');
-                    html += `<tr>
-                        <td>${new Date(s.created_at).toLocaleString()}</td>
-                        <td><strong>${s.symbol}</strong></td>
-                        <td class="${s.signal_type === 'LONG' ? 'buy' : 'sell'}">${s.signal_type === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</td>
-                        <td>$${parseFloat(s.entry_price).toFixed(8)}</td>
-                        <td>$${parseFloat(s.stop_loss).toFixed(8)}</td>
-                        <td>${s.take_profits ? s.take_profits.split(',').slice(0,3).map(tp => `$${parseFloat(tp).toFixed(8)}`).join('<br>') : '-'}</td>
-                        <td>${statusText}</td>
-                        <td class="${pnl >= 0 ? 'buy' : 'sell'}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</td>
-                    </tr>`;
-                }
-                html += `</tbody></table>`;
-                if (table) table.innerHTML = html;
-            } catch(e) { console.error('Помилка завантаження історії:', e); const table = document.getElementById('signalsHistoryTable'); if (table) table.innerHTML = '<div class="loading">❌ Помилка завантаження</div>'; }
+    const limit = document.getElementById('signalsHistoryLimit')?.value || 50;
+    try {
+        const response = await fetch(`/api/signals/history?limit=${limit}`);
+        const signals = await response.json();
+        const table = document.getElementById('signalsHistoryTable');
+
+        if (!signals || signals.length === 0) {
+            if (table) table.innerHTML = '<div class="loading">Немає історії сигналів</div>';
+            return;
         }
+
+        let html = `<table><thead>——
+                        <th>Час</th>
+                        <th>Пара</th>
+                        <th>Тип</th>
+                        <th>Entry</th>
+                        <th>SL</th>
+                        <th>TP</th>
+                        <th>Статус</th>
+                        <th>PnL</th>
+                        <th>Помилка</th>
+                    </tr></thead><tbody>`;
+
+        for (const s of signals) {
+            const pnl = parseFloat(s.total_pnl || s.pnl || 0);
+            const statusText = s.status === 'closed' ? '✅ Закрито' :
+                              (s.status === 'active' ? '🟢 Активний' :
+                              (s.status === 'failed' ? '❌ Невдалий' : '⏳ Очікує'));
+
+            // ВИПРАВЛЕНО: перевіряємо чи take_profits є рядком або масивом
+            let tpDisplay = '-';
+            if (s.take_profits) {
+                if (Array.isArray(s.take_profits)) {
+                    tpDisplay = s.take_profits.slice(0, 3).map(tp => `$${parseFloat(tp).toFixed(8)}`).join('<br>');
+                } else if (typeof s.take_profits === 'string') {
+                    tpDisplay = s.take_profits.split(',').slice(0, 3).map(tp => `$${parseFloat(tp).toFixed(8)}`).join('<br>');
+                }
+            }
+
+            const errorMsg = s.error_message ? (s.error_message.length > 50 ? s.error_message.substring(0, 50) + '...' : s.error_message) : '';
+
+            html += `<tr style="border-bottom: 1px solid #2a2a4a; ${s.status === 'failed' ? 'background: #ff444422;' : ''}">
+                <td style="padding: 12px;">${new Date(s.created_at).toLocaleString()}</td>
+                <td style="padding: 12px; font-weight: bold;">${s.symbol}</td>
+                <td style="padding: 12px;" class="${s.signal_type === 'LONG' ? 'buy' : 'sell'}">${s.signal_type === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</td>
+                <td style="padding: 12px;">$${parseFloat(s.entry_price).toFixed(8)}</td>
+                <td style="padding: 12px;" class="sell">$${parseFloat(s.stop_loss).toFixed(8)}</td>
+                <td style="padding: 12px;">${tpDisplay}</td>
+                <td style="padding: 12px;">${statusText}</td>
+                <td style="padding: 12px;" class="${pnl >= 0 ? 'buy' : 'sell'}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</td>
+                <td style="padding: 12px; font-size: 11px; color: #ff8888;">${errorMsg || '-'}</td>
+            </tr>`;
+        }
+        html += `</tbody></table>`;
+        if (table) table.innerHTML = html;
+
+    } catch(e) {
+        console.error('Помилка завантаження історії:', e);
+        const table = document.getElementById('signalsHistoryTable');
+        if (table) table.innerHTML = '<div class="loading">❌ Помилка завантаження</div>';
+    }
+}
 
         async function refreshSignalsData() { await loadSignalsStatus(); await loadSignalsHistory(); }
 
@@ -3139,6 +3273,59 @@ async function updateScalpPnL() {
             return result;
         }
 
+        async function loadTechAnalysisOrders() {
+    const side = document.getElementById('taOrdersSideFilter')?.value || 'all';
+    const status = document.getElementById('taOrdersStatusFilter')?.value || 'all';
+    const limit = document.getElementById('taOrdersLimit')?.value || 20;
+
+    try {
+        const response = await fetch(`/api/orders?side=${side}&status=${status}&limit=${limit}&strategy=tech_analysis`);
+        const orders = await response.json();
+        const table = document.getElementById('taOrdersTable');
+
+        if (!table) return;
+        if (orders.length === 0) {
+            table.innerHTML = '<div class="loading">Немає угод для технічного аналізу</div>';
+            return;
+        }
+
+        let html = `<div class="orders-table">
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background: #0f0f1a; border-bottom: 2px solid #2a2a4a;">
+                        <th style="padding: 12px;">Час</th>
+                        <th style="padding: 12px;">Пара</th>
+                        <th style="padding: 12px;">Сторона</th>
+                        <th style="padding: 12px;">Ціна</th>
+                        <th style="padding: 12px;">Кількість</th>
+                        <th style="padding: 12px;">Статус</th>
+                        <th style="padding: 12px;">PnL</th>
+                        <th style="padding: 12px;">Сигнал</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        for (const o of orders) {
+            const pnlValue = parseFloat(o.pnl || 0);
+            html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${pnlValue}, '${o.opened_at}')" style="cursor: pointer; border-bottom: 1px solid #2a2a4a;">
+                <td style="padding: 12px;">${new Date(o.opened_at).toLocaleString()}</td>
+                <td style="padding: 12px;"><strong>${o.symbol}</strong></td>
+                <td style="padding: 12px;" class="${o.side === 'buy' ? 'buy' : 'sell'}">${o.side === 'buy' ? '📈 LONG' : '📉 SHORT'}</td>
+                <td style="padding: 12px;">$${parseFloat(o.price).toFixed(2)}</td>
+                <td style="padding: 12px;">${parseFloat(o.quantity).toFixed(6)}</td>
+                <td style="padding: 12px;">${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td>
+                <td style="padding: 12px;" class="${pnlValue >= 0 ? 'buy' : 'sell'}">${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)}</td>
+                <td style="padding: 12px;">${o.signal_type || '-'}</td>
+            </tr>`;
+        }
+        html += `</tbody></table></div>`;
+        table.innerHTML = html;
+    } catch(e) {
+        console.error('Помилка завантаження угод тех. аналізу:', e);
+        document.getElementById('taOrdersTable').innerHTML = '<div class="loading">❌ Помилка завантаження</div>';
+    }
+}
+
         function refreshTechAnalysis() { loadTechAnalysisStatus(); loadTechForecasts(); loadTechChart(); }
 
         // ============= ВІДЖЕТ ЦІН =============
@@ -3222,6 +3409,105 @@ async function updateScalpPnL() {
                 });
             }
         });
+
+        window.quickToggleTechAnalysis = async function() {
+    try {
+        const response = await fetch('/api/tech_analysis/toggle', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            loadTechAnalysisQuickStatus();
+            if (typeof loadAllData === 'function') loadAllData();
+        } else {
+            alert('❌ Помилка: ' + (data.error || 'невідома'));
+        }
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка: ' + e.message);
+    }
+};
+
+window.quickResetTechAnalysis = async function() {
+    if (!confirm('⚠️ Скинути стратегію технічного аналізу?')) return;
+    try {
+        const response = await fetch('/api/tech_analysis/reset', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            alert('✅ Стратегію скинуто');
+            loadTechAnalysisQuickStatus();
+            if (typeof loadAllData === 'function') loadAllData();
+        } else {
+            alert('❌ Помилка: ' + (data.error || 'невідома'));
+        }
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка: ' + e.message);
+    }
+};
+
+// Функції для роботи з tech_analysis API
+async function loadTechAnalysisQuickStatus() {
+    try {
+        const response = await fetch('/api/tech_analysis/status');
+        const data = await response.json();
+        if (data.error) {
+            console.warn('Tech analysis не знайдено:', data.error);
+            return;
+        }
+
+        const statusSpan = document.getElementById('taQuickStatus');
+        const toggleBtn = document.getElementById('taQuickToggleBtn');
+
+        if (data.enabled) {
+            if (statusSpan) {
+                statusSpan.innerHTML = '✅ Активна';
+                statusSpan.className = 'strategy-status status-active';
+            }
+            if (toggleBtn) {
+                toggleBtn.innerHTML = '❌ Зупинити';
+                toggleBtn.style.background = '#dc3545';
+            }
+        } else {
+            if (statusSpan) {
+                statusSpan.innerHTML = '❌ Зупинено';
+                statusSpan.className = 'strategy-status status-inactive';
+            }
+            if (toggleBtn) {
+                toggleBtn.innerHTML = '✅ Запустити';
+                toggleBtn.style.background = '#28a745';
+            }
+        }
+
+        // Оновлюємо метрики
+        const accuracyEl = document.getElementById('taQuickAccuracy');
+        if (accuracyEl) accuracyEl.innerHTML = `${data.forecast_accuracy || 0}%`;
+
+        const activeEl = document.getElementById('taQuickActive');
+        if (activeEl) activeEl.innerHTML = data.active_forecasts || 0;
+
+        const pnlEl = document.getElementById('taQuickPnl');
+        if (pnlEl) {
+            const pnl = data.total_pnl || 0;
+            pnlEl.innerHTML = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+            pnlEl.style.color = pnl >= 0 ? '#00ff88' : '#ff4444';
+        }
+
+        const winRateEl = document.getElementById('taQuickWinRate');
+        if (winRateEl) winRateEl.innerHTML = `${(data.win_rate || 0).toFixed(1)}%`;
+
+    } catch(e) {
+        console.error('Помилка завантаження статусу тех. аналізу:', e);
+    }
+}
+
+// Додаємо виклик при завантаженні сторінки
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(loadTechAnalysisQuickStatus, 1000);
+    });
+} else {
+    setTimeout(loadTechAnalysisQuickStatus, 1000);
+}
+
 
         if (window.matchMedia('(display-mode: standalone)').matches) { console.log('📱 Додаток працює в режимі PWA'); document.body.classList.add('pwa-mode'); const installBtn = document.getElementById('installPwaBtn'); if (installBtn) installBtn.style.display = 'none'; }
     </script>
