@@ -15,7 +15,7 @@ from database.db import get_db, get_price_history
 from datetime import datetime
 from web.hooks import register_webhook_routes
 from web.webhook_routes import register_webhook_routes
-from backend.api.routes_tech_analysis import tech_analysis_bp
+from backend.api.routes_tech_analysis import tech_analysis_bp, init_trading_engine
 
 logger = setup_logger('web')
 
@@ -39,7 +39,10 @@ def create_flask_app(config, trading_engine):
     app = Flask(__name__)
     app.config['SECRET_KEY'] = config.FLASK_SECRET_KEY
 
-    # ============= [НОВЕ] MIDDLEWARE ДЛЯ МЕТРИК API =============
+    # Ініціалізуємо trading_engine для blueprint tech_analysis
+    init_trading_engine(trading_engine)
+
+    # ============= MIDDLEWARE ДЛЯ МЕТРИК API =============
     @app.before_request
     def before_request():
         request.start_time = time.time()
@@ -154,7 +157,6 @@ def create_flask_app(config, trading_engine):
         try:
             logger.info(f"Запит графіка для ордера: {order_id}")
 
-            # СПОЧАТКУ ПЕРЕВІРЯЄМО ЧИ Є ДАНІ В БД
             from database.db import get_price_history
             saved_klines = get_price_history(order_id)
 
@@ -173,16 +175,11 @@ def create_flask_app(config, trading_engine):
                 order_dict = dict(order)
                 strategy_name = order_dict.get('strategy_name', 'unknown')
 
-                # Перевіряємо чи є колонка closed_price
                 col_info = conn.execute("PRAGMA table_info(orders)").fetchall()
                 has_closed_price = any(c[1] == 'closed_price' for c in col_info)
 
-                # Якщо є збережені свічки - використовуємо їх (тільки для tf=1, інакше йдемо в Bybit)
                 tf_param = request.args.get('tf', '1')
                 if saved_klines and len(saved_klines) > 0 and tf_param == '1':
-                    logger.info(f"Використовуємо збережені свічки для угоди {order_id}: {len(saved_klines)}")
-
-                    # Формуємо точки входу/виходу
                     entry_point = {
                         'price': float(order_dict['price']),
                         'timestamp': order_dict['opened_at'],
@@ -195,7 +192,6 @@ def create_flask_app(config, trading_engine):
                         if has_closed_price and order_dict.get('closed_price'):
                             closed_price = float(order_dict['closed_price'])
 
-                        # Якщо closed_price відсутній - розраховуємо з PnL
                         if not closed_price and order_dict.get('pnl') is not None and order_dict.get('quantity'):
                             qty = float(order_dict['quantity'])
                             entry_p = float(order_dict['price'])
@@ -222,7 +218,6 @@ def create_flask_app(config, trading_engine):
                         'from_db': True
                     })
 
-                # ========== ЯКЩО ДАНИХ В БД НЕМАЄ - ЗАВАНТАЖУЄМО З BYBIT ==========
                 logger.info(f"Збережених свічок немає, завантажуємо з Bybit для угоди {order_id}")
 
                 entry_point = None
@@ -258,7 +253,6 @@ def create_flask_app(config, trading_engine):
                             }
 
                 else:
-                    # Для Grid - шукаємо парний ордер
                     pair_order = None
                     if order_dict.get('pair_id'):
                         cursor = conn.execute(
@@ -291,11 +285,8 @@ def create_flask_app(config, trading_engine):
                             }
 
                 symbol = order_dict['symbol']
-
-                # Отримуємо свічки з Bybit
                 from datetime import datetime, timezone
 
-                # Таймфрейм з query param (для перемикача на фронтенді)
                 tf = request.args.get('tf', '1')
                 valid_tfs = {'1', '3', '5', '15', '30', '60', '120', '240', 'D'}
                 if tf not in valid_tfs:
@@ -320,9 +311,8 @@ def create_flask_app(config, trading_engine):
 
                 exit_dt = parse_dt(exit_point['timestamp']) if exit_point else None
 
-                # Вікно: 30 свічок до входу і 30 після виходу
                 BEFORE_SECS = 30 * tf_minutes * 60
-                AFTER_SECS  = 30 * tf_minutes * 60
+                AFTER_SECS = 30 * tf_minutes * 60
 
                 start_ts_ms = int((entry_dt.timestamp() - BEFORE_SECS) * 1000)
                 if exit_dt:
@@ -347,7 +337,6 @@ def create_flask_app(config, trading_engine):
                 else:
                     out_of_range = False
 
-                # Конвертуємо timestamp в ISO рядки
                 klines_out = []
                 for k in filtered_klines:
                     k_copy = dict(k)
@@ -407,12 +396,11 @@ def create_flask_app(config, trading_engine):
                 })
         return jsonify({'error': 'Strategy not found'}), 404
 
-        # ============= МЕТРИКИ ТА ГРАФІКИ API =============
+    # ============= МЕТРИКИ ТА ГРАФІКИ API =============
 
     @app.route('/api/pnl_history')
     @async_route
     async def api_pnl_history():
-        """Отримання історії PnL для графіка"""
         strategy = request.args.get('strategy', 'all')
         days = int(request.args.get('days', 7))
 
@@ -451,7 +439,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/trades_distribution')
     @async_route
     async def api_trades_distribution():
-        """Розподіл угод по стратегіях"""
         with get_db() as conn:
             cursor = conn.execute("""
                 SELECT s.name as strategy, COUNT(*) as count
@@ -466,7 +453,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/win_rate_stats')
     @async_route
     async def api_win_rate_stats():
-        """Статистика Win Rate по стратегіях"""
         with get_db() as conn:
             cursor = conn.execute("""
                 SELECT 
@@ -495,14 +481,12 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/balance_history')
     @async_route
     async def api_balance_history():
-        """Історія балансу"""
         days = int(request.args.get('days', 30))
 
         from datetime import datetime, timedelta
         start_date = datetime.now() - timedelta(days=days)
 
         with get_db() as conn:
-            # Отримуємо денні зміни балансу з ордерів
             cursor = conn.execute("""
                 SELECT 
                     date(closed_at) as date,
@@ -515,8 +499,7 @@ def create_flask_app(config, trading_engine):
 
             rows = cursor.fetchall()
 
-            # Розраховуємо кумулятивний баланс
-            balance = 100.0  # Початковий баланс
+            balance = 100.0
             history = []
             for row in rows:
                 balance += row['daily_pnl'] or 0
@@ -528,12 +511,11 @@ def create_flask_app(config, trading_engine):
 
             return jsonify({'history': history})
 
-    # ============= НОВЕ: ЛОГИ API (БД) =============
+    # ============= ЛОГИ API (БД) =============
 
     @app.route('/api/logs')
     @async_route
     async def api_logs():
-        """Отримання логів з БД з пагінацією"""
         from database.db import get_logs, get_logs_count
 
         page = request.args.get('page', 1, type=int)
@@ -562,14 +544,12 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/log_modules')
     @async_route
     async def api_log_modules():
-        """Отримання списку модулів для фільтрації"""
         from database.db import get_db
 
         with get_db() as conn:
             cursor = conn.execute("SELECT DISTINCT module FROM logs ORDER BY module")
             modules = [row['module'] for row in cursor.fetchall()]
 
-        # Додаємо модулі з налаштувань які ще не мають логів
         from database.db import get_log_settings
         settings = get_log_settings()
         for module in settings.keys():
@@ -581,7 +561,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/log_settings')
     @async_route
     async def api_log_settings():
-        """Отримання налаштувань логування"""
         from database.db import get_log_settings, get_log_retention_days
 
         return jsonify({
@@ -592,10 +571,8 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/log_settings', methods=['POST'])
     @async_route
     async def api_update_log_settings():
-        """Оновлення налаштувань логування"""
         from database.db import update_log_settings, set_log_retention_days
         from utils.logger_utils import update_log_level
-        import psutil
 
         data = request.get_json()
 
@@ -614,7 +591,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/clear_logs', methods=['POST'])
     @async_route
     async def api_clear_logs():
-        """Очищення логів"""
         try:
             with get_db() as conn:
                 conn.execute("DELETE FROM logs")
@@ -625,7 +601,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/cleanup_logs', methods=['POST'])
     @async_route
     async def api_cleanup_logs():
-        """Очищення старих логів"""
         from database.db import cleanup_old_logs
 
         data = request.get_json()
@@ -672,7 +647,7 @@ def create_flask_app(config, trading_engine):
             if strategy.name == 'scalp' and hasattr(strategy, 'update_settings'):
                 await strategy.update_settings(
                     symbols=data.get('symbols'),
-                    timeframe=data.get('timeframe'),  # ← ДОДАТИ
+                    timeframe=data.get('timeframe'),
                     trade_size_usdt=data.get('trade_size_usdt'),
                     take_profit_percent=data.get('take_profit_percent'),
                     stop_loss_percent=data.get('stop_loss_percent'),
@@ -684,7 +659,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/dashboard/settings', methods=['GET'])
     @async_route
     async def api_dashboard_settings():
-        """Отримання налаштувань дашборду"""
         from config_manager import get_dashboard_settings
         settings = get_dashboard_settings()
         return jsonify(settings)
@@ -692,7 +666,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/dashboard/settings', methods=['POST'])
     @async_route
     async def api_update_dashboard_settings():
-        """Оновлення налаштувань дашборду"""
         from config_manager import save_dashboard_settings
 
         data = request.get_json()
@@ -714,7 +687,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/crypto/prices')
     @async_route
     async def api_crypto_prices():
-        """Отримання поточних цін та змін за 24 години"""
         from config_manager import get_dashboard_settings
 
         settings = get_dashboard_settings()
@@ -723,10 +695,8 @@ def create_flask_app(config, trading_engine):
         prices = {}
         for symbol in symbols:
             try:
-                # Отримуємо поточну ціну
                 current_price = await trading_engine.exchange.get_current_price(symbol)
 
-                # Отримуємо зміну за 24 години
                 change_24h = 0
                 klines = await trading_engine.exchange.get_klines(symbol, 'D', limit=2)
                 if len(klines) >= 2:
@@ -752,15 +722,13 @@ def create_flask_app(config, trading_engine):
 
         return jsonify(prices)
 
-    # Додайте ці ендпоінти в web/app.py
+    # ============= Сигнали API =============
 
     @app.route('/api/signals/add', methods=['POST'])
     @async_route
     async def api_add_signal():
-        """Додавання нового сигналу"""
         data = request.get_json()
 
-        # Отримуємо стратегію signals
         signals_strategy = None
         for strategy in trading_engine.strategies.values():
             if strategy.name == 'signals':
@@ -770,7 +738,6 @@ def create_flask_app(config, trading_engine):
         if not signals_strategy:
             return jsonify({'error': 'Signals strategy not found'}), 404
 
-        # Парсимо текст або використовуємо готові дані
         if 'text' in data:
             parsed = signals_strategy.parse_signal_text(data['text'])
             if not parsed:
@@ -788,7 +755,6 @@ def create_flask_app(config, trading_engine):
                 'trade_size_usdt': data.get('trade_size_usdt', 20)
             }
 
-        # Валідація
         required_fields = ['symbol', 'signal_type', 'entry_price', 'stop_loss', 'take_profits']
         for field in required_fields:
             if not signal_data.get(field):
@@ -807,9 +773,7 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/signals/close/<signal_id>', methods=['POST'])
     @async_route
     async def api_close_signal(signal_id):
-        """Ручне закриття сигналу"""
         try:
-            # Отримуємо JSON (навіть якщо порожній)
             data = {}
             if request.is_json:
                 data = request.get_json() or {}
@@ -839,7 +803,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/signals/active')
     @async_route
     async def api_get_active_signals():
-        """Отримання активних сигналів"""
         for strategy in trading_engine.strategies.values():
             if strategy.name == 'signals':
                 status = await strategy.get_status()
@@ -849,14 +812,12 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/signals/history')
     @async_route
     async def api_get_signals_history():
-        """Отримання історії сигналів"""
         limit = request.args.get('limit', 50, type=int)
 
         from database.db import get_db
 
         try:
             with get_db() as conn:
-                # Отримуємо ID стратегії signals
                 strategy = conn.execute(
                     "SELECT id FROM strategies WHERE name = 'signals'"
                 ).fetchone()
@@ -864,7 +825,6 @@ def create_flask_app(config, trading_engine):
                 if not strategy:
                     return jsonify([])
 
-                # ВИПРАВЛЕНО: прибираємо LEFT JOIN, тому що немає колонки order_id в signals
                 signals = conn.execute("""
                     SELECT * FROM signals
                     WHERE strategy_id = ?
@@ -872,24 +832,19 @@ def create_flask_app(config, trading_engine):
                     LIMIT ?
                 """, (strategy['id'], limit)).fetchall()
 
-                # Конвертуємо в список словників
                 result = []
                 for s in signals:
                     row = dict(s)
-                    # Перетворюємо take_profits з рядка в список
                     if row.get('take_profits'):
                         if isinstance(row['take_profits'], str):
                             row['take_profits'] = [float(x) for x in row['take_profits'].split(',') if x]
                         elif row['take_profits'] is None:
                             row['take_profits'] = []
-                    # Перетворюємо числові значення
                     for key in ['entry_price', 'stop_loss', 'trade_size_usdt']:
                         if key in row and row[key] is not None:
                             row[key] = float(row[key])
-                    # Додаємо created_at як рядок
                     if 'created_at' in row and row['created_at']:
                         row['created_at'] = str(row['created_at'])
-                    # Додаємо pnl та closed_price (вони будуть None, тому що немає JOIN)
                     row['order_pnl'] = None
                     row['closed_price'] = None
                     result.append(row)
@@ -902,11 +857,9 @@ def create_flask_app(config, trading_engine):
             traceback.print_exc()
             return jsonify({'error': str(e)}), 500
 
-
     @app.route('/api/signals/status')
     @async_route
     async def api_signals_status():
-        """Отримання статусу signals стратегії"""
         for strategy in trading_engine.strategies.values():
             if strategy.name == 'signals':
                 status = await strategy.get_status()
@@ -918,13 +871,10 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/power/status')
     @async_route
     async def api_power_status():
-        """Поточний статус моніторингу"""
         try:
             from monitoring.power_monitor import power_monitor
 
-            # Перевіряємо чи монітор запущений
             if not power_monitor.running:
-                # Повертаємо пусті дані, якщо монітор не запущений
                 return jsonify({
                     'current_power_watts': 0,
                     'uptime_seconds': 0,
@@ -964,7 +914,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/power/history')
     @async_route
     async def api_power_history():
-        """Історія споживання"""
         days = request.args.get('days', 30, type=int)
         from database.power_monitor_db import get_power_history
         history = get_power_history(days)
@@ -973,7 +922,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/power/settings', methods=['GET'])
     @async_route
     async def api_power_settings_get():
-        """Отримання налаштувань"""
         from database.power_monitor_db import get_power_settings
         settings = get_power_settings()
         return jsonify(settings)
@@ -981,15 +929,11 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/power/settings', methods=['POST'])
     @async_route
     async def api_power_settings_update():
-        """Оновлення налаштувань"""
         data = request.get_json()
         from database.power_monitor_db import update_power_settings
         from monitoring.power_monitor import power_monitor
 
-        # Оновлюємо в БД
         update_power_settings(data)
-
-        # Оновлюємо в пам'яті
         power_monitor._load_settings()
 
         return jsonify({'success': True})
@@ -1006,12 +950,10 @@ def create_flask_app(config, trading_engine):
                     grid = strategy.grids[symbol]
                     price = await trading_engine.exchange.get_current_price(symbol)
                     if price > 0:
-                        # Скасовуємо всі ордери
                         for oid in list(grid.active_buy_orders.keys()):
                             await grid.cancel_order(oid)
                         for oid in list(grid.active_sell_orders.keys()):
                             await grid.cancel_order(oid)
-                        # Перебудовуємо сітку
                         grid.is_initialized = False
                         await grid.initialize_grid(price)
                         return jsonify({'success': True})
@@ -1188,8 +1130,6 @@ def create_flask_app(config, trading_engine):
         klines = await trading_engine.exchange.get_klines(symbol, interval, limit)
         return jsonify(klines)
 
-
-
     # ============= Режим роботи API =============
 
     @app.route('/api/mode')
@@ -1253,173 +1193,15 @@ def create_flask_app(config, trading_engine):
                 return jsonify(status)
         return jsonify({'error': 'Scalp strategy not found'}), 404
 
-
-
-    # ============= Система API =============
-
-    @app.route('/api/system_status')
-    @async_route
-    async def api_system_status():
-        import psutil
-        start_time = getattr(trading_engine, 'start_time', None)
-        if not start_time:
-            start_time = time.time()
-            trading_engine.start_time = start_time
-        uptime_seconds = int(time.time() - start_time)
-        uptime_str = f"{uptime_seconds // 3600}г {(uptime_seconds % 3600) // 60}х {uptime_seconds % 60}с"
-        try:
-            return jsonify({
-                'cpu_percent': psutil.cpu_percent(interval=0.5),
-                'cpu_count': psutil.cpu_count(),
-                'ram_percent': psutil.virtual_memory().percent,
-                'ram_used_gb': round(psutil.virtual_memory().used / (1024 ** 3), 2),
-                'ram_total_gb': round(psutil.virtual_memory().total / (1024 ** 3), 2),
-                'disk_percent': psutil.disk_usage('/').percent,
-                'disk_used_gb': round(psutil.disk_usage('/').used / (1024 ** 3), 2),
-                'disk_total_gb': round(psutil.disk_usage('/').total / (1024 ** 3), 2),
-                'uptime': uptime_str,
-                'uptime_seconds': uptime_seconds
-            })
-        except Exception as e:
-            return jsonify({'error': str(e), 'uptime': uptime_str}), 500
-
-    # ============= Електроенергія API =============
-
-    @app.route('/api/electricity')
-    @async_route
-    async def api_electricity():
-        import psutil
-        import os
-        BASE_POWER_WATTS = 3.5
-        MAX_POWER_WATTS = 6.5
-        PSU_EFFICIENCY = float(os.getenv('PSU_EFFICIENCY', '0.85'))
-        CABLE_LOSS = float(os.getenv('CABLE_LOSS', '0.03'))
-        PRICE_PER_KWH = float(os.getenv('ELECTRICITY_PRICE', '4.32'))
-        cpu_percent = psutil.cpu_percent(interval=0.5)
-        ram_percent = psutil.virtual_memory().percent
-        cpu_factor = 0.7 + (cpu_percent / 100) * 0.6
-        ram_factor = 0.9 + (ram_percent / 100) * 0.2
-        load_factor = (cpu_factor + ram_factor) / 2
-        rpi_power = BASE_POWER_WATTS + (MAX_POWER_WATTS - BASE_POWER_WATTS) * (load_factor - 0.7) / 0.6
-        rpi_power = max(BASE_POWER_WATTS, min(MAX_POWER_WATTS, rpi_power))
-        total_power = rpi_power / PSU_EFFICIENCY * (1 + CABLE_LOSS)
-        start_time = getattr(trading_engine, 'start_time', None)
-        if not start_time:
-            start_time = time.time()
-            trading_engine.start_time = start_time
-        uptime_seconds = int(time.time() - start_time)
-        uptime_hours = uptime_seconds / 3600
-        energy_kwh = (total_power * uptime_hours) / 1000
-        cost_uah = energy_kwh * PRICE_PER_KWH
-        hours_per_month = 30 * 24
-        hours_per_year = 365 * 24
-        monthly_energy_kwh = (total_power * hours_per_month) / 1000
-        monthly_cost_uah = monthly_energy_kwh * PRICE_PER_KWH
-        yearly_energy_kwh = (total_power * hours_per_year) / 1000
-        yearly_cost_uah = yearly_energy_kwh * PRICE_PER_KWH
-        avg_power = (energy_kwh * 1000) / uptime_hours if uptime_hours > 0 else total_power
-        daily_cost = (total_power * 24 / 1000) * PRICE_PER_KWH
-        return jsonify({
-            'current_power': round(total_power, 2),
-            'rpi_power': round(rpi_power, 2),
-            'psu_efficiency': round(PSU_EFFICIENCY * 100, 1),
-            'cable_loss': round(CABLE_LOSS * 100, 1),
-            'cpu_load': round(cpu_percent, 1),
-            'ram_load': round(ram_percent, 1),
-            'uptime_hours': round(uptime_hours, 2),
-            'uptime_days': round(uptime_hours / 24, 2),
-            'uptime_seconds': uptime_seconds,
-            'energy_used_kwh': round(energy_kwh, 4),
-            'cost_uah': round(cost_uah, 2),
-            'avg_power': round(avg_power, 2),
-            'daily_cost': round(daily_cost, 2),
-            'monthly_energy_kwh': round(monthly_energy_kwh, 2),
-            'monthly_cost_uah': round(monthly_cost_uah, 2),
-            'yearly_energy_kwh': round(yearly_energy_kwh, 2),
-            'yearly_cost_uah': round(yearly_cost_uah, 2),
-            'price_per_kwh': PRICE_PER_KWH,
-            'base_power': BASE_POWER_WATTS,
-            'max_power': MAX_POWER_WATTS
-        })
-
-    @app.route('/api/strategy/<int:strategy_id>/full_reset', methods=['POST'])
-    @async_route
-    async def api_full_reset_strategy(strategy_id):
-        if strategy_id in trading_engine.strategies:
-            strategy = trading_engine.strategies[strategy_id]
-            was_enabled = strategy.enabled
-            if was_enabled:
-                await trading_engine.stop_strategy(strategy_id)
-            await strategy.reset()
-            if hasattr(strategy, 'grids'):
-                for grid in strategy.grids.values():
-                    grid.is_initialized = False
-                    grid.lower_price = None
-                    grid.upper_price = None
-                    grid.grid_spacing = None
-                    grid.active_buy_orders.clear()
-                    grid.active_sell_orders.clear()
-                    grid.price_history.clear()
-                    grid.locked_balance = 0
-            if was_enabled:
-                await trading_engine.start_strategy(strategy_id)
-            return jsonify({'success': True, 'restarted': was_enabled})
-        return jsonify({'error': 'Strategy not found'}), 404
-
-    @app.route('/api/strategy/<int:strategy_id>/force_init', methods=['POST'])
-    @async_route
-    async def api_force_init_strategy(strategy_id):
-        if strategy_id in trading_engine.strategies:
-            strategy = trading_engine.strategies[strategy_id]
-            if strategy.name == 'grid' and hasattr(strategy, 'grids'):
-                for symbol, grid in strategy.grids.items():
-                    price = await trading_engine.exchange.get_current_price(symbol)
-                    if price > 0:
-                        grid.is_initialized = False
-                        grid.lower_price = None
-                        grid.upper_price = None
-                        grid.active_buy_orders.clear()
-                        grid.active_sell_orders.clear()
-                        await grid.initialize_grid(price)
-                        logger.info(f"Примусово ініціалізовано {symbol} за ціною ${price:.2f}")
-                return jsonify({'success': True})
-        return jsonify({'error': 'Strategy not found'}), 404
-
-    @app.route('/api/strategy/<int:strategy_id>/status', methods=['GET'])
-    @async_route
-    async def api_strategy_status(strategy_id):
-        if strategy_id in trading_engine.strategies:
-            strategy = trading_engine.strategies[strategy_id]
-            status = await strategy.get_status()
-            if strategy.name == 'grid' and hasattr(strategy, 'grids'):
-                grid_details = {}
-                for symbol, grid in strategy.grids.items():
-                    grid_details[symbol] = {
-                        'is_initialized': grid.is_initialized,
-                        'lower_price': grid.lower_price,
-                        'upper_price': grid.upper_price,
-                        'buy_orders': len(grid.active_buy_orders),
-                        'sell_orders': len(grid.active_sell_orders),
-                        'locked_balance': grid.locked_balance,
-                        'available_balance': grid.available_balance
-                    }
-                status['grid_details'] = grid_details
-            return jsonify(status)
-        return jsonify({'error': 'Strategy not found'}), 404
-
-    # ============= Новинна стратегія API =============
-
     @app.route('/api/news_status')
     @async_route
     async def api_news_status():
-        """Отримання статусу новинної стратегії"""
         try:
             for strategy in trading_engine.strategies.values():
                 if strategy.name == 'news':
                     status = await strategy.get_status()
                     articles = []
 
-                    # Отримуємо останні новини зі стратегії
                     if hasattr(strategy, 'last_news') and strategy.last_news:
                         for article in strategy.last_news[:20]:
                             title = article.get('title', '').lower()
@@ -1428,12 +1210,10 @@ def create_flask_app(config, trading_engine):
 
                             positive_keywords = ['surge', 'rally', 'gain', 'positive', 'bullish', 'record', 'high',
                                                  'upgrade', 'approve', 'adoption', 'breakthrough', 'soar', 'pump',
-                                                 'moon',
-                                                 'green']
+                                                 'moon', 'green']
                             negative_keywords = ['drop', 'crash', 'fall', 'negative', 'bearish', 'low', 'decline',
-                                                 'hack',
-                                                 'ban', 'scandal', 'fraud', 'crackdown', 'dump', 'red', 'sell', 'panic',
-                                                 'fud']
+                                                 'hack', 'ban', 'scandal', 'fraud', 'crackdown', 'dump', 'red',
+                                                 'sell', 'panic', 'fud']
 
                             pos_score = sum(1 for kw in positive_keywords if kw in text)
                             neg_score = sum(1 for kw in negative_keywords if kw in text)
@@ -1454,12 +1234,11 @@ def create_flask_app(config, trading_engine):
                                 'sentiment': sentiment
                             })
 
-                    # Отримуємо історію сентименту з БД
                     sentiment_history = []
                     try:
                         from database.db import get_sentiment_history
                         sentiment_history = get_sentiment_history(limit=50)
-                        sentiment_history.reverse()  # для хронологічного порядку
+                        sentiment_history.reverse()
                     except Exception as e:
                         logger.warning(f"Не вдалося отримати історію сентименту: {e}")
 
@@ -1494,7 +1273,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/scalp/force_close/<symbol>', methods=['POST'])
     @async_route
     async def api_scalp_force_close(symbol):
-        """Примусове закриття позиції скальпінгу по символу"""
         logger.info(f"Запит на примусове закриття позиції {symbol}")
 
         for strategy in trading_engine.strategies.values():
@@ -1552,7 +1330,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/backtest/grid', methods=['POST'])
     @async_route
     async def api_backtest_grid():
-        """Запуск бектесту Grid стратегії"""
         from trading.backtest import GridBacktest
 
         data = request.get_json()
@@ -1569,7 +1346,6 @@ def create_flask_app(config, trading_engine):
 
         logger.info(f"Бектест отримано: start={start_date_str}, end={end_date_str}")
 
-        # Парсинг дат з підтримкою різних форматів
         try:
             if 'T' in start_date_str:
                 start_date = datetime.fromisoformat(start_date_str)
@@ -1588,7 +1364,6 @@ def create_flask_app(config, trading_engine):
         if start_date >= end_date:
             return jsonify({'error': 'Start date must be before end date'}), 400
 
-        # Обмежуємо діапазон для продуктивності
         max_days = 90
         if (end_date - start_date).days > max_days:
             return jsonify({'error': f'Date range cannot exceed {max_days} days'}), 400
@@ -1618,7 +1393,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/backtest/grid/optimize', methods=['POST'])
     @async_route
     async def api_backtest_grid_optimize():
-        """Оптимізація параметрів Grid стратегії"""
         from trading.backtest import GridBacktest
 
         data = request.get_json()
@@ -1630,7 +1404,6 @@ def create_flask_app(config, trading_engine):
 
         logger.info(f"Оптимізація отримана: start={start_date_str}, end={end_date_str}")
 
-        # Парсинг дат з підтримкою різних форматів
         try:
             if 'T' in start_date_str:
                 start_date = datetime.fromisoformat(start_date_str)
@@ -1649,7 +1422,6 @@ def create_flask_app(config, trading_engine):
         if start_date >= end_date:
             return jsonify({'error': 'Start date must be before end date'}), 400
 
-        # Обмежуємо діапазон для продуктивності
         max_days = 30
         if (end_date - start_date).days > max_days:
             return jsonify({'error': f'Optimization date range cannot exceed {max_days} days'}), 400
@@ -1680,7 +1452,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/health/status')
     @async_route
     async def api_health_status():
-        """Загальний статус системи"""
         import psutil
         import time
         from pathlib import Path
@@ -1692,7 +1463,6 @@ def create_flask_app(config, trading_engine):
             'components': {}
         }
 
-        # ===== База даних =====
         try:
             with get_db() as conn:
                 size = Path('trading_bot.db').stat().st_size if Path('trading_bot.db').exists() else 0
@@ -1707,13 +1477,10 @@ def create_flask_app(config, trading_engine):
             result['components']['database'] = {'status': 'error', 'message': str(e)}
             result['overall'] = 'degraded'
 
-        # ===== Bybit API =====
         try:
             if trading_engine and trading_engine.exchange:
-                # Перевіряємо чи є ціни
                 prices = trading_engine.exchange.current_prices
                 has_prices = len(prices) > 0
-                # Перевіряємо WebSocket
                 ws_connected = len(trading_engine.exchange.ws_connections) > 0 if hasattr(trading_engine.exchange,
                                                                                           'ws_connections') else False
 
@@ -1730,7 +1497,6 @@ def create_flask_app(config, trading_engine):
             result['components']['bybit'] = {'status': 'error', 'message': str(e)}
             result['overall'] = 'degraded'
 
-        # ===== Telegram Bot =====
         try:
             if trading_engine and hasattr(trading_engine, 'telegram_bot') and trading_engine.telegram_bot:
                 is_running = getattr(trading_engine.telegram_bot, '_running', False)
@@ -1748,7 +1514,6 @@ def create_flask_app(config, trading_engine):
         except Exception as e:
             result['components']['telegram'] = {'status': 'error', 'message': str(e)}
 
-        # ===== News API =====
         try:
             news_strategy = None
             for strategy in trading_engine.strategies.values():
@@ -1774,7 +1539,6 @@ def create_flask_app(config, trading_engine):
         except Exception as e:
             result['components']['news_api'] = {'status': 'error', 'message': str(e)}
 
-        # ===== WebSocket Сервер =====
         try:
             from web.websocket_server import connected_clients
             clients_count = len(connected_clients) if 'connected_clients' in dir() else 0
@@ -1786,7 +1550,6 @@ def create_flask_app(config, trading_engine):
         except:
             result['components']['websocket'] = {'status': 'unknown', 'message': 'Не вдалося перевірити'}
 
-        # ===== Веб-сервер =====
         try:
             result['components']['web_server'] = {
                 'status': 'healthy',
@@ -1796,7 +1559,6 @@ def create_flask_app(config, trading_engine):
         except:
             result['components']['web_server'] = {'status': 'healthy', 'message': 'Працює'}
 
-        # ===== Система =====
         try:
             cpu = psutil.cpu_percent(interval=0.5)
             ram = psutil.virtual_memory().percent
@@ -1819,7 +1581,6 @@ def create_flask_app(config, trading_engine):
         except Exception as e:
             result['components']['system'] = {'status': 'error', 'message': str(e)}
 
-        # ===== Стратегії =====
         strategies_status = []
         for strategy in trading_engine.strategies.values():
             status = await strategy.get_status()
@@ -1832,7 +1593,6 @@ def create_flask_app(config, trading_engine):
             })
         result['components']['strategies'] = strategies_status
 
-        # ===== Логи (помилки за 24 години) =====
         try:
             from database.db import get_db
             from datetime import datetime, timedelta
@@ -1863,7 +1623,6 @@ def create_flask_app(config, trading_engine):
         except Exception as e:
             result['components']['logs'] = {'status': 'error', 'message': str(e)}
 
-        # Фінальний статус
         if result['overall'] == 'healthy':
             result['message'] = '✅ Всі системи працюють нормально'
         elif result['overall'] == 'degraded':
@@ -1876,7 +1635,6 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/health/test')
     @async_route
     async def api_health_test():
-        """Тестування конкретного компонента"""
         component = request.args.get('component', 'all')
 
         results = {}
@@ -1916,24 +1674,24 @@ def create_flask_app(config, trading_engine):
 
         return jsonify(results)
 
-    # ============= [НОВЕ] PROMETHEUS METRICS API =============
+    # ============= ТЕХНІЧНИЙ АНАЛІЗ API (BLUEPRINT) =============
+    # Реєструємо blueprint для технічного аналізу
+    app.register_blueprint(tech_analysis_bp)
+
+    # ============= PROMETHEUS METRICS API =============
 
     @app.route('/metrics')
     async def metrics_endpoint():
-        """Prometheus метрики для зовнішнього моніторингу"""
         from monitoring.metrics import get_metrics
         return get_metrics(), 200, {'Content-Type': 'text/plain'}
 
     @app.route('/api/metrics')
     @async_route
     async def api_metrics():
-        """JSON метрики для веб-інтерфейсу"""
         from monitoring.metrics import get_metrics_json, metrics_collector
         import psutil
 
-        # Оновлюємо метрики перед відповіддю
         try:
-            # Системні метрики
             cpu_percent = psutil.cpu_percent(interval=0.5)
             ram_percent = psutil.virtual_memory().percent
             ram_used = psutil.virtual_memory().used / (1024 ** 3)
@@ -1941,31 +1699,26 @@ def create_flask_app(config, trading_engine):
 
             metrics_collector.update_system_metrics(cpu_percent, ram_percent, ram_used, disk_percent)
 
-            # Оновлюємо метрики стратегій
             for strategy in trading_engine.strategies.values():
                 status = await strategy.get_status()
                 metrics_collector.update_trading_metrics(strategy.name, status, trading_engine.config.DEFAULT_MODE)
 
-                # Grid специфічні метрики
                 if strategy.name == 'grid' and hasattr(strategy, 'grids'):
                     for symbol, grid in strategy.grids.items():
                         grid_status = grid.get_status()
                         metrics_collector.update_grid_metrics(symbol, grid_status)
 
-                # Scalp специфічні метрики
                 if strategy.name == 'scalp' and hasattr(strategy, 'open_positions'):
                     for symbol in strategy.symbols:
                         has_position = symbol in strategy.open_positions
                         metrics_collector.update_scalp_metrics(symbol, has_position, 0)
 
-                # News специфічні метрики
                 if strategy.name == 'news':
                     metrics_collector.update_news_metrics(
                         status.get('current_sentiment', 'neutral'),
                         status.get('last_news_count', 0)
                     )
 
-            # Ринкові метрики
             for symbol in trading_engine.config.SYMBOLS:
                 price = await trading_engine.exchange.get_current_price(symbol)
                 if price > 0:
@@ -1988,7 +1741,8 @@ def create_flask_app(config, trading_engine):
 
         threading.Thread(target=restart).start()
         return jsonify({'success': True})
-        # ВЕБ-ХУКИ
 
+    # ВЕБ-ХУКИ
     register_webhook_routes(app, trading_engine)
+
     return app
