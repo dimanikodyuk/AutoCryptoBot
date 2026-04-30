@@ -2741,29 +2741,83 @@ async function updateScalpPnL() {
 
 		        // ============= СИГНАЛИ =============
         async function loadSignalsStatus() {
-            try {
-                const response = await fetch('/api/signals/status');
-                const status = await response.json();
-                if (document.getElementById('signalsBalance')) document.getElementById('signalsBalance').innerHTML = `$${(status.balance || 0).toFixed(2)}`;
-                const pnlElem = document.getElementById('signalsPnl');
-                if (pnlElem) { pnlElem.innerHTML = `$${(status.total_pnl || 0).toFixed(2)}`; pnlElem.className = `stat-value ${(status.total_pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}`; }
-                if (document.getElementById('signalsTrades')) document.getElementById('signalsTrades').innerHTML = status.total_trades || 0;
-                if (document.getElementById('signalsWinRate')) document.getElementById('signalsWinRate').innerHTML = `${status.win_rate || 0}%`;
-                if (document.getElementById('signalsActive')) document.getElementById('signalsActive').innerHTML = (status.active_signals || []).length;
-                const activeTable = document.getElementById('activeSignalsTable');
-                if (activeTable) {
-                    if (status.active_signals && status.active_signals.length > 0) {
-                        let html = `<table><thead><tr><th>Час</th><th>Пара</th><th>Тип</th><th>Entry</th><th>SL</th><th>TP</th><th>Прогрес</th><th>Дія</th></tr></thead><tbody>`;
-                        for (const s of status.active_signals) {
-                            const progress = `${s.partial_closes}/${s.total_tp}`;
-                            html += `<tr><td>${new Date().toLocaleTimeString()}</td><td><strong>${s.symbol}</strong><td><td class="${s.type === 'LONG' ? 'buy' : 'sell'}">${s.type === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</td><td>$${s.entry_price.toFixed(8)}</td><td class="sell">$${s.stop_loss.toFixed(8)}</td><td>${s.take_profits.map(tp => `$${tp.toFixed(8)}`).join('<br>')}</td><td>🎯 ${progress}</td><td><button class="btn-small" style="background:#dc3545;" onclick="closeSignal('${s.id}')">❌ Закрити</button></td></tr>`;
-                        }
-                        html += `</tbody></table>`;
-                        activeTable.innerHTML = html;
-                    } else { activeTable.innerHTML = '<div class="loading">Немає активних сигналів</div>'; }
-                }
-            } catch(e) { console.error('Помилка завантаження статусу сигналів:', e); }
+    try {
+        const response = await fetch('/api/signals/status');
+        const status = await response.json();
+
+        console.log('📡 Signals status:', status);  // Додайте для діагностики
+
+        if (document.getElementById('signalsBalance'))
+            document.getElementById('signalsBalance').innerHTML = `$${(status.balance || 0).toFixed(2)}`;
+
+        const pnlElem = document.getElementById('signalsPnl');
+        if (pnlElem) {
+            pnlElem.innerHTML = `$${(status.total_pnl || 0).toFixed(2)}`;
+            pnlElem.className = `stat-value ${(status.total_pnl || 0) >= 0 ? 'stat-positive' : 'stat-negative'}`;
         }
+
+        if (document.getElementById('signalsTrades'))
+            document.getElementById('signalsTrades').innerHTML = status.total_trades || 0;
+
+        if (document.getElementById('signalsWinRate'))
+            document.getElementById('signalsWinRate').innerHTML = `${status.win_rate || 0}%`;
+
+        if (document.getElementById('signalsActive'))
+            document.getElementById('signalsActive').innerHTML = (status.active_signals || []).length;
+
+        const activeTable = document.getElementById('activeSignalsTable');
+        if (activeTable) {
+            // Перевіряємо різні можливі формати даних
+            let activeSignals = status.active_signals || status.signals || [];
+
+            if (activeSignals.length > 0) {
+                let html = `<table><thead>——
+                            <th>Час</th>
+                            <th>Пара</th>
+                            <th>Тип</th>
+                            <th>Entry</th>
+                            <th>SL</th>
+                            <th>TP</th>
+                            <th>Стан</th>
+                            <th>Дія</th>
+                        </tr></thead><tbody>`;
+
+                for (const s of activeSignals) {
+                    // Підтримка різних форматів даних
+                    const signalId = s.id || s.signal_id;
+                    const symbol = s.symbol;
+                    const signalType = s.type || s.signal_type;
+                    const entryPrice = s.entry_price;
+                    const stopLoss = s.stop_loss;
+                    const takeProfits = s.take_profits || [];
+                    const partialCloses = s.partial_closes || 0;
+                    const totalTp = s.total_tp || takeProfits.length;
+
+                    html += `
+                        <tr style="border-bottom: 1px solid #2a2a4a;">
+                            <td style="padding: 12px;">${new Date(s.created_at || Date.now()).toLocaleTimeString()}<tr>
+                            <td style="padding: 12px;"><strong>${symbol}</strong></td>
+                            <td style="padding: 12px;" class="${signalType === 'LONG' ? 'buy' : 'sell'}">${signalType === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</td>
+                            <td style="padding: 12px;">$${parseFloat(entryPrice).toFixed(8)}</td>
+                            <td style="padding: 12px;" class="sell">$${parseFloat(stopLoss).toFixed(8)}</td>
+                            <td style="padding: 12px;">${takeProfits.slice(0,3).map(tp => `$${parseFloat(tp).toFixed(8)}`).join('<br>')}</td>
+                            <td style="padding: 12px;">🎯 ${partialCloses}/${totalTp}</td>
+                            <td style="padding: 12px;"><button class="btn-small" style="background:#dc3545;" onclick="closeSignal('${signalId}')">❌ Закрити</button></td>
+                        </tr>
+                    `;
+                }
+                html += `</tbody></table>`;
+                activeTable.innerHTML = html;
+            } else {
+                activeTable.innerHTML = '<div class="loading">Немає активних сигналів</div>';
+            }
+        }
+    } catch(e) {
+        console.error('Помилка завантаження статусу сигналів:', e);
+        const activeTable = document.getElementById('activeSignalsTable');
+        if (activeTable) activeTable.innerHTML = '<div class="loading">❌ Помилка завантаження</div>';
+    }
+}
 
         async function parseAndAddSignal() {
             const text = document.getElementById('signalText')?.value;
