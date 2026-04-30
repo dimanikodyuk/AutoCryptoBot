@@ -7,7 +7,7 @@ import sys
 import os
 import threading
 from pathlib import Path
-
+from datetime import datetime, timedelta
 from config import Config
 from database.db import init_db, add_log
 from web.app import create_flask_app
@@ -108,91 +108,153 @@ class CryptoBot:
         while self.running:
             try:
                 await asyncio.sleep(300)  # Кожні 5 хвилин
-                if self.tech_strategy and self.tech_strategy.enabled:
-                    await self.tech_strategy.check_forecasts()
-                    logger.debug("Перевірку прогнозів виконано")
+
+                # Отримуємо стратегію tech_analysis з trading_engine
+                tech_strategy = None
+                if self.trading_engine:
+                    for strategy in self.trading_engine.strategies.values():
+                        if strategy.name == 'tech_analysis':
+                            tech_strategy = strategy
+                            break
+
+                if tech_strategy and tech_strategy.enabled:
+                    # Перевіряємо чи є метод check_forecasts
+                    if hasattr(tech_strategy, 'check_forecasts'):
+                        await tech_strategy.check_forecasts()
+                        logger.debug("Перевірку прогнозів виконано")
+                    else:
+                        # Якщо методу немає, просто логуємо
+                        logger.debug("Метод check_forecasts не реалізовано в tech_analysis")
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Помилка в перевірці прогнозів: {e}")
 
     async def _market_analyzer(self):
-        """Фоновий цикл для аналізу ринку та створення прогнозів (кожні 15 хвилин)"""
+        """Фоновий цикл для аналізу ринку (кожні 15 хвилин)"""
         logger.info("🔄 Запущено фоновий цикл аналізу ринку (кожні 15 хвилин)")
         while self.running:
             try:
                 await asyncio.sleep(900)  # Кожні 15 хвилин
-                if self.tech_strategy and self.tech_strategy.enabled:
-                    await self._analyze_all_symbols()
+
+                # Отримуємо стратегію tech_analysis з trading_engine
+                tech_strategy = None
+                if self.trading_engine:
+                    for strategy in self.trading_engine.strategies.values():
+                        if strategy.name == 'tech_analysis':
+                            tech_strategy = strategy
+                            break
+
+                if tech_strategy and tech_strategy.enabled:
+                    await self._analyze_all_symbols(tech_strategy)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Помилка в аналізі ринку: {e}")
 
-    async def _analyze_all_symbols(self):
+    async def _analyze_all_symbols(self, tech_strategy):
         """Аналіз всіх символів та створення прогнозів"""
         try:
-            for symbol in self.tech_strategy.symbols:
-                # Отримуємо дані для аналізу з трьох таймфреймів
-                klines_data = {}
+            for symbol in tech_strategy.symbols:
+                try:
+                    # Отримуємо поточну ціну
+                    current_price = await self.trading_engine.exchange.get_current_price(symbol)
+                    if current_price <= 0:
+                        continue
 
-                for tf in self.tech_strategy.timeframes:
-                    # Визначаємо ліміт залежно від таймфрейму
-                    if tf == "1D":
-                        limit = 60
-                        interval = "D"
-                    elif tf == "4H":
-                        limit = 100
-                        interval = "240"
-                    else:  # 1H
-                        limit = 100
-                        interval = "60"
+                    # Отримуємо індикатори для аналізу
+                    if hasattr(tech_strategy, '_get_indicators'):
+                        indicators = await tech_strategy._get_indicators(symbol)
+                        if not indicators:
+                            continue
 
-                    # Отримуємо дані з Bybit через trading_engine
-                    klines = await self.trading_engine.get_klines(symbol, interval, limit)
-                    if klines:
-                        klines_data[tf] = klines
+                        # Визначаємо сигнал
+                        signal = 'long' if indicators.get('buy_signal') else 'short' if indicators.get(
+                            'sell_signal') else 'neutral'
+                        confidence = indicators.get('confidence', 0)
 
-                if not klines_data:
-                    continue
+                        # Розраховуємо цільову ціну
+                        target_price = current_price
+                        if signal == 'long':
+                            target_price = current_price * (1 + tech_strategy.take_profit_percent / 100)
+                        elif signal == 'short':
+                            target_price = current_price * (1 - tech_strategy.take_profit_percent / 100)
 
-                # Виконуємо аналіз
-                result = await self.tech_strategy.analyze_symbol(symbol, klines_data)
+                        # Формуємо пояснення
+                        explanation = [
+                            f"📊 Тренд: {indicators.get('trend', 'neutral')}",
+                            f"📈 RSI: {indicators.get('rsi', 50):.1f}",
+                            f"🎯 Впевненість: {confidence:.0f}%"
+                        ]
 
-                # Якщо є сигнал і впевненість достатня - створюємо прогноз
-                if result['signal'] != 'neutral' and result['confidence'] >= self.tech_strategy.min_confidence:
-                    # Перевіряємо чи немає вже активного прогнозу для цього символу
-                    has_active = False
-                    for forecast in self.tech_strategy.forecasts:
-                        if forecast['symbol'] == symbol and forecast['status'] == 'active':
-                            has_active = True
-                            break
+                        # Якщо є сигнал і впевненість достатня - створюємо прогноз
+                        if signal != 'neutral' and confidence >= tech_strategy.min_confidence:
+                            # Перевіряємо чи немає вже активного прогнозу
+                            has_active = False
+                            if hasattr(tech_strategy, 'forecasts'):
+                                for forecast in tech_strategy.forecasts:
+                                    if forecast.get('symbol') == symbol and forecast.get('status') == 'active':
+                                        has_active = True
+                                        break
 
-                    if not has_active:
-                        await self.tech_strategy.create_forecast(
-                            symbol=symbol,
-                            signal=result['signal'],
-                            target_price=result['target_price'],
-                            current_price=klines_data['1H'][-1]['close'],
-                            confidence=result['confidence'],
-                            explanation=result['explanation']
-                        )
-                        logger.info(
-                            f"📊 Створено новий прогноз для {symbol}: {result['signal']} з впевненістю {result['confidence']}%")
+                            if not has_active:
+                                # Створюємо прогноз
+                                forecast = {
+                                    'id': int(datetime.now().timestamp()),
+                                    'symbol': symbol,
+                                    'signal_type': signal,
+                                    'entry_price': current_price,
+                                    'target_price': target_price,
+                                    'confidence': confidence,
+                                    'explanation': ' | '.join(explanation),
+                                    'status': 'active',
+                                    'success': None,
+                                    'created_at': datetime.now().isoformat(),
+                                    'expires_at': (datetime.now() + timedelta(hours=12)).isoformat(),
+                                    'resolved_at': None,
+                                    'resolved_price': None
+                                }
 
-                        # Якщо стратегія активна і це сигнал - виконуємо угоду
-                        if self.tech_strategy.enabled and result['signal'] in ['long', 'short']:
-                            await self._execute_forecast_trade(symbol, result)
+                                if hasattr(tech_strategy, 'forecasts'):
+                                    tech_strategy.forecasts.append(forecast)
+
+                                logger.info(
+                                    f"📊 Створено новий прогноз для {symbol}: {signal} з впевненістю {confidence:.0f}%")
+
+                                # Відправляємо сповіщення в Telegram
+                                if self.telegram_bot:
+                                    await self.telegram_bot.send_notification(
+                                        f"📊 *НОВИЙ ПРОГНОЗ* (TechAnalysis)\n"
+                                        f"└ Пара: `{symbol}`\n"
+                                        f"└ Сигнал: {'🟢 LONG' if signal == 'long' else '🔴 SHORT'}\n"
+                                        f"└ Ціна входу: `${current_price:.2f}`\n"
+                                        f"└ Ціль: `${target_price:.2f}`\n"
+                                        f"└ Впевненість: {confidence:.0f}%\n"
+                                        f"└ Час: до {explanation[2]}",
+                                        parse_mode='Markdown'
+                                    )
+
+                                # Якщо стратегія активна - виконуємо угоду
+                                if tech_strategy.enabled and signal in ['long', 'short']:
+                                    await self._execute_forecast_trade(symbol, {
+                                        'signal': signal,
+                                        'current_price': current_price,
+                                        'confidence': confidence,
+                                        'target_price': target_price,
+                                        'explanation': explanation
+                                    }, tech_strategy)
+
+                except Exception as e:
+                    logger.error(f"Помилка аналізу {symbol}: {e}")
 
         except Exception as e:
             logger.error(f"Помилка аналізу всіх символів: {e}")
 
-    async def _execute_forecast_trade(self, symbol: str, analysis_result: dict):
+    async def _execute_forecast_trade(self, symbol: str, analysis_result: dict, tech_strategy):
         """Виконання угоди на основі прогнозу"""
         try:
             current_price = analysis_result.get('current_price', 0)
             if not current_price:
-                # Отримуємо поточну ціну
                 klines = await self.trading_engine.get_klines(symbol, "1", 1)
                 if klines:
                     current_price = klines[0]['close']
@@ -200,34 +262,65 @@ class CryptoBot:
             if current_price <= 0:
                 return
 
-            # Розраховуємо розмір угоди (50% від балансу)
-            trade_size = self.tech_strategy.balance * (self.tech_strategy.trade_size_percent / 100)
+            # Розраховуємо розмір угоди
+            trade_size = tech_strategy.balance * (tech_strategy.trade_size_percent / 100)
 
             if trade_size < 10:
-                logger.warning(f"Недостатньо коштів для угоди {symbol}: баланс ${self.tech_strategy.balance:.2f}")
+                logger.warning(f"Недостатньо коштів для угоди {symbol}: баланс ${tech_strategy.balance:.2f}")
                 return
 
-            # Виконуємо угоду через trading_engine
-            if analysis_result['signal'] == 'long':
-                await self.trading_engine.execute_trade(
-                    strategy="tech_analysis",
-                    symbol=symbol,
-                    side="buy",
-                    price=current_price,
-                    quantity=trade_size / current_price,
-                    order_type="market"
+            quantity = trade_size / current_price
+
+            # Мінімальна кількість
+            min_qty = 0.0001 if 'BTC' in symbol else 0.001
+            if quantity < min_qty:
+                quantity = min_qty
+                trade_size = quantity * current_price
+
+            # Виконуємо угоду
+            side = 'buy' if analysis_result['signal'] == 'long' else 'sell'
+
+            if self.trading_engine.config.DEFAULT_MODE == 'real':
+                # Реальна торгівля
+                result = await self.trading_engine.exchange.create_order(symbol, side, 'Market', quantity,
+                                                                         current_price)
+                if result.get('error'):
+                    logger.error(f"Помилка виконання угоди {symbol}: {result}")
+                    return
+            else:
+                # Симуляція
+                logger.info(f"[SIMULATION] {side.upper()} {quantity:.6f} {symbol} @ ${current_price:.2f}")
+
+            # Зберігаємо ордер в БД
+            order_id = f"ta_{symbol}_{int(datetime.now().timestamp())}"
+            tech_strategy._save_order(order_id, symbol, side, current_price, quantity, 'open',
+                                      'LONG' if analysis_result['signal'] == 'long' else 'SHORT')
+
+            # Додаємо до відкритих позицій
+            tech_strategy.open_positions[symbol] = {
+                'order_id': order_id,
+                'entry_price': current_price,
+                'quantity': quantity,
+                'side': side,
+                'opened_at': datetime.now().isoformat(),
+                'signal_type': 'LONG' if analysis_result['signal'] == 'long' else 'SHORT'
+            }
+
+            tech_strategy.locked_balance += trade_size
+
+            logger.info(
+                f"✅ Виконано {analysis_result['signal'].upper()} угоду для {symbol}: ${trade_size:.2f} @ ${current_price:.2f}")
+
+            if self.telegram_bot:
+                await self.telegram_bot.send_notification(
+                    f"📈 *ВІДКРИТО ПОЗИЦІЮ* (Прогноз)\n"
+                    f"└ Пара: `{symbol}`\n"
+                    f"└ Тип: {'🟢 LONG' if analysis_result['signal'] == 'long' else '🔴 SHORT'}\n"
+                    f"└ Ціна: `${current_price:.2f}`\n"
+                    f"└ Сума: `${trade_size:.2f}`\n"
+                    f"└ Впевненість: {analysis_result.get('confidence', 0):.0f}%",
+                    parse_mode='Markdown'
                 )
-                logger.info(f"✅ Виконано LONG угоду для {symbol}: ${trade_size:.2f} @ ${current_price:.2f}")
-            elif analysis_result['signal'] == 'short':
-                await self.trading_engine.execute_trade(
-                    strategy="tech_analysis",
-                    symbol=symbol,
-                    side="sell",
-                    price=current_price,
-                    quantity=trade_size / current_price,
-                    order_type="market"
-                )
-                logger.info(f"✅ Виконано SHORT угоду для {symbol}: ${trade_size:.2f} @ ${current_price:.2f}")
 
         except Exception as e:
             logger.error(f"Помилка виконання угоди для {symbol}: {e}")
