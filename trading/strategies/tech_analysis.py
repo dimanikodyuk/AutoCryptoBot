@@ -31,6 +31,10 @@ class TechAnalysisStrategy(BaseStrategy):
         self.stop_loss_percent = saved.get('stop_loss_percent', 2.0)
         self.min_confidence = saved.get('min_confidence', 65.0)
 
+        # НОВІ ОБМЕЖЕННЯ
+        self.max_concurrent_positions = 3  # Максимум 3 відкриті позиції одночасно
+        self.min_trade_amount = 10  # Мінімальна сума угоди $10
+
         # Стан
         self.balance = 100.0
         self.locked_balance = 0.0
@@ -47,6 +51,7 @@ class TechAnalysisStrategy(BaseStrategy):
         self._load_history()
 
         logger.info(f"TechAnalysisStrategy ініціалізовано для пар: {self.symbols}")
+        logger.info(f"Обмеження: макс. позицій={self.max_concurrent_positions}, мін. сума=${self.min_trade_amount}")
 
     async def start(self):
         await super().start()
@@ -72,6 +77,21 @@ class TechAnalysisStrategy(BaseStrategy):
 
     def get_current_balance(self) -> float:
         return self.balance
+
+    def can_open_new_position(self) -> bool:
+        """Перевірка чи можна відкрити нову позицію"""
+        # Перевіряємо кількість відкритих позицій
+        if len(self.open_positions) >= self.max_concurrent_positions:
+            logger.debug(f"[TechAnalysis] Максимум позицій ({self.max_concurrent_positions}) досягнуто")
+            return False
+
+        # Перевіряємо доступний баланс
+        available = self.available_balance
+        if available < self.min_trade_amount:
+            logger.debug(f"[TechAnalysis] Недостатньо балансу: доступно ${available:.2f}, потрібно мінімум ${self.min_trade_amount:.2f}")
+            return False
+
+        return True
 
     def _load_history(self):
         """Завантаження історії з БД"""
@@ -153,6 +173,11 @@ class TechAnalysisStrategy(BaseStrategy):
                 if symbol in self.open_positions:
                     await self._check_exit(symbol, price)
                 else:
+                    # Перевіряємо чи можна відкривати нову позицію
+                    if not self.can_open_new_position():
+                        logger.debug(f"[TechAnalysis] Пропускаємо {symbol}, досягнуто ліміт позицій ({len(self.open_positions)}/{self.max_concurrent_positions})")
+                        continue
+
                     if indicators['buy_signal'] and indicators['confidence'] >= self.min_confidence:
                         await self._open_position(symbol, price, indicators)
                         signals_generated.append(f"{symbol}: BUY")
@@ -261,22 +286,34 @@ class TechAnalysisStrategy(BaseStrategy):
 
     async def _open_position(self, symbol: str, price: float, indicators: dict, is_long: bool = True):
         """Відкриття позиції (віртуальне або реальне)"""
-        trade_amount = self.balance * (self.trade_size_percent / 100)
+
+        # Перевіряємо ще раз чи можна відкривати (для безпеки)
+        if not self.can_open_new_position():
+            logger.info(f"[TechAnalysis] Пропускаємо відкриття {symbol}, ліміт позицій досягнуто")
+            return
+
+        # Розраховуємо розмір угоди (обмежуємо 25% від балансу на одну позицію)
+        max_per_position = self.balance * 0.25  # Максимум 25% від загального балансу
+        trade_amount = min(
+            self.balance * (self.trade_size_percent / 100),
+            max_per_position
+        )
 
         # Мінімальна сума угоди
-        if trade_amount < 10:
-            logger.warning(f"[TechAnalysis] Мінімальна сума угоди $10, поточна: ${trade_amount:.2f}")
-            trade_amount = 10
+        if trade_amount < self.min_trade_amount:
+            trade_amount = self.min_trade_amount
+            logger.info(f"[TechAnalysis] Коригуємо суму до мінімальної: ${trade_amount:.2f}")
 
         quantity = trade_amount / price
 
-        # Перевірка мінімальної кількості (для BTCUSDT мінімум 0.0001)
+        # Перевірка мінімальної кількості
         min_qty = 0.0001 if 'BTC' in symbol else 0.001
         if quantity < min_qty:
             quantity = min_qty
             trade_amount = quantity * price
             logger.info(f"[TechAnalysis] Коригуємо кількість до мінімальної: {quantity}")
 
+        # Фінальна перевірка доступного балансу
         if self.available_balance < trade_amount:
             logger.warning(f"[TechAnalysis] Недостатньо балансу: потрібно ${trade_amount:.2f}, доступно ${self.available_balance:.2f}")
             return
@@ -284,23 +321,13 @@ class TechAnalysisStrategy(BaseStrategy):
         side = 'buy' if is_long else 'sell'
         order_id = f"ta_{symbol}_{int(datetime.now().timestamp())}_{self.strategy_id}"
 
-        # ВИПРАВЛЕНО: використовуємо метод execute_trade замість create_order
-        # Оскільки це стратегія, вона працює через trading_engine
-        # Але тут у нас немає прямого доступу до trading_engine.
-        # Тому створюємо віртуальну угоду через self.exchange.execute_order
-
-        # Для віртуальної торгівлі просто зберігаємо угоду в БД
-        # Реальна торгівля потребує окремого підходу
-
         if self.mode == 'real':
-            # Реальна торгівля через exchange
             result = await self.exchange.create_order(symbol, side, 'Market', quantity, price)
             if result.get('error'):
                 logger.error(f"[TechAnalysis] Помилка відкриття позиції {symbol}: {result}")
                 return
         else:
-            # Віртуальна торгівля - просто логуємо
-            logger.info(f"[TechAnalysis] ВІРТУАЛЬНА угода: {side} {quantity} {symbol} @ ${price:.2f}")
+            logger.info(f"[TechAnalysis] ВІРТУАЛЬНА угода: {side} {quantity:.6f} {symbol} @ ${price:.2f} (сума: ${trade_amount:.2f})")
 
         self.open_positions[symbol] = {
             'order_id': order_id,
@@ -316,6 +343,7 @@ class TechAnalysisStrategy(BaseStrategy):
 
         signal_text = "LONG (КУПІВЛЯ)" if is_long else "SHORT (ПРОДАЖ)"
         logger.info(f"[TechAnalysis] 📈 Відкрито позицію {symbol}: {signal_text} {quantity:.6f} @ ${price:.2f} (сума: ${trade_amount:.2f})")
+        logger.info(f"[TechAnalysis] Стан: відкрито {len(self.open_positions)}/{self.max_concurrent_positions} позицій, заблоковано ${self.locked_balance:.2f}, доступно ${self.available_balance:.2f}")
 
         if self.telegram_bot:
             await self.telegram_bot.send_notification(
@@ -325,6 +353,7 @@ class TechAnalysisStrategy(BaseStrategy):
                 f"└ Ціна: `${price:.2f}`\n"
                 f"└ Кількість: {quantity:.6f}\n"
                 f"└ Сума: `${trade_amount:.2f}`\n"
+                f"└ Відкрито позицій: {len(self.open_positions)}/{self.max_concurrent_positions}\n"
                 f"└ RSI: {indicators['rsi']:.1f}\n"
                 f"└ Впевненість: {indicators['confidence']:.0f}%",
                 parse_mode='Markdown'
@@ -411,6 +440,7 @@ class TechAnalysisStrategy(BaseStrategy):
         pnl_icon = "✅" if pnl >= 0 else "❌"
 
         logger.info(f"[TechAnalysis] 📉 Закрито позицію {symbol}: {reason_text}, PnL: {pnl_icon} ${pnl:.2f} ({pnl_percent:+.2f}%)")
+        logger.info(f"[TechAnalysis] Стан після закриття: відкрито {len(self.open_positions)} позицій, доступно ${self.available_balance:.2f}")
 
         if self.telegram_bot:
             await self.telegram_bot.send_notification(
@@ -452,6 +482,7 @@ class TechAnalysisStrategy(BaseStrategy):
             'max_daily_trades': self.max_daily_trades,
             'is_blocked': self._is_blocked,
             'block_reason': self._block_reason,
+            'max_concurrent_positions': self.max_concurrent_positions,
             'settings': {
                 'trade_size_percent': self.trade_size_percent,
                 'min_confidence': self.min_confidence,
