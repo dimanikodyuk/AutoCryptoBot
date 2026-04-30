@@ -3003,29 +3003,111 @@ async function updateScalpPnL() {
         let taUpdateInterval = null;
 
         async function loadTechAnalysisStatus() {
-            try {
-                const response = await fetch('/api/tech_analysis/status');
-                const data = await response.json();
-                if (data.error) { console.error('Помилка завантаження статусу:', data.error); return; }
-                const balanceEl = document.getElementById('taBalance'); if (balanceEl) balanceEl.innerHTML = `$${data.balance.toFixed(2)}`;
-                const lockedEl = document.getElementById('taLocked'); if (lockedEl) lockedEl.innerHTML = `$${data.locked_balance.toFixed(2)}`;
-                const pnlElem = document.getElementById('taPnl'); if (pnlElem) { pnlElem.innerHTML = `$${data.total_pnl.toFixed(2)}`; pnlElem.className = `stat-value ${data.total_pnl >= 0 ? 'stat-positive' : 'stat-negative'}`; }
-                const winRateEl = document.getElementById('taWinRate'); if (winRateEl) winRateEl.innerHTML = `${data.win_rate.toFixed(1)}%`;
-                const tradesEl = document.getElementById('taTotalTrades'); if (tradesEl) tradesEl.innerHTML = data.total_trades;
-                const symbolsEl = document.getElementById('taSymbols'); if (symbolsEl) symbolsEl.value = data.symbols.join(', ');
-                const tradeSizeEl = document.getElementById('taTradeSize'); if (tradeSizeEl) tradeSizeEl.value = data.settings.trade_size_percent;
-                const minConfEl = document.getElementById('taMinConfidence'); if (minConfEl) minConfEl.value = data.settings.min_confidence;
-                const stopLossEl = document.getElementById('taStopLoss'); if (stopLossEl) stopLossEl.value = data.settings.stop_loss_percent;
-                const takeProfitEl = document.getElementById('taTakeProfit'); if (takeProfitEl) takeProfitEl.value = data.settings.take_profit_percent;
-                const toggleBtn = document.getElementById('taToggleBtn');
-                if (toggleBtn) {
-                    if (data.enabled) { toggleBtn.innerHTML = '❌ Зупинити стратегію'; toggleBtn.style.background = '#dc3545'; }
-                    else { toggleBtn.innerHTML = '✅ Запустити стратегію'; toggleBtn.style.background = '#28a745'; }
-                }
-                await loadTechForecastStats();
-                await loadTechForecasts();
-            } catch(e) { console.error('Помилка завантаження статусу тех. аналізу:', e); }
+    try {
+        const response = await fetch('/api/tech_analysis/status');
+        const data = await response.json();
+
+        console.log('Tech Analysis Status:', data);
+
+        // Безпечне отримання значень з перевіркою на undefined
+        const balance = data?.balance ?? 0;
+        const lockedBalance = data?.locked_balance ?? 0;
+        const totalPnl = data?.total_pnl ?? 0;
+        const totalTrades = data?.total_trades ?? 0;
+        const winRate = data?.win_rate ?? 0;
+
+        // Захист від відсутніх полів settings
+        const settings = data?.settings ?? {};
+        const tradeSizePercent = settings?.trade_size_percent ?? data?.trade_size_percent ?? 50;
+        const minConfidence = settings?.min_confidence ?? data?.min_confidence ?? 65;
+        const stopLossPercent = settings?.stop_loss_percent ?? data?.stop_loss_percent ?? 2.0;
+        const takeProfitPercent = settings?.take_profit_percent ?? data?.take_profit_percent ?? 4.0;
+
+        const symbols = data?.symbols ?? ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+
+        // Оновлюємо UI елементи
+        const balanceEl = document.getElementById('taBalance');
+        if (balanceEl) balanceEl.innerHTML = `$${balance.toFixed(2)}`;
+
+        const lockedEl = document.getElementById('taLocked');
+        if (lockedEl) lockedEl.innerHTML = `$${lockedBalance.toFixed(2)}`;
+
+        const pnlElem = document.getElementById('taPnl');
+        if (pnlElem) {
+            pnlElem.innerHTML = `$${totalPnl.toFixed(2)}`;
+            pnlElem.className = `stat-value ${totalPnl >= 0 ? 'stat-positive' : 'stat-negative'}`;
         }
+
+        const winRateEl = document.getElementById('taWinRate');
+        if (winRateEl) winRateEl.innerHTML = `${winRate.toFixed(1)}%`;
+
+        const tradesEl = document.getElementById('taTotalTrades');
+        if (tradesEl) tradesEl.innerHTML = totalTrades;
+
+        const symbolsEl = document.getElementById('taSymbols');
+        if (symbolsEl) symbolsEl.value = symbols.join(', ');
+
+        const tradeSizeEl = document.getElementById('taTradeSize');
+        if (tradeSizeEl) tradeSizeEl.value = tradeSizePercent;
+
+        const minConfEl = document.getElementById('taMinConfidence');
+        if (minConfEl) minConfEl.value = minConfidence;
+
+        const stopLossEl = document.getElementById('taStopLoss');
+        if (stopLossEl) stopLossEl.value = stopLossPercent;
+
+        const takeProfitEl = document.getElementById('taTakeProfit');
+        if (takeProfitEl) takeProfitEl.value = takeProfitPercent;
+
+        const toggleBtn = document.getElementById('taToggleBtn');
+        if (toggleBtn) {
+            if (data?.enabled) {
+                toggleBtn.innerHTML = '❌ Зупинити стратегію';
+                toggleBtn.style.background = '#dc3545';
+            } else {
+                toggleBtn.innerHTML = '✅ Запустити стратегію';
+                toggleBtn.style.background = '#28a745';
+            }
+        }
+
+        // Оновлюємо швидкий статус на дашборді (якщо є)
+        const quickStatus = document.getElementById('taQuickStatus');
+        if (quickStatus) {
+            quickStatus.innerHTML = data?.enabled ? '✅ Активна' : '❌ Зупинено';
+            quickStatus.className = `strategy-status ${data?.enabled ? 'status-active' : 'status-inactive'}`;
+        }
+
+        const quickAccuracy = document.getElementById('taQuickAccuracy');
+        if (quickAccuracy) quickAccuracy.innerHTML = `${data?.forecast_accuracy ?? 0}%`;
+
+        const quickActive = document.getElementById('taQuickActive');
+        if (quickActive) quickActive.innerHTML = data?.active_forecasts ?? 0;
+
+        const quickPnl = document.getElementById('taQuickPnl');
+        if (quickPnl) {
+            quickPnl.innerHTML = `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`;
+            quickPnl.style.color = totalPnl >= 0 ? '#00ff88' : '#ff4444';
+        }
+
+        const quickWinRate = document.getElementById('taQuickWinRate');
+        if (quickWinRate) quickWinRate.innerHTML = `${winRate.toFixed(1)}%`;
+
+        // Завантажуємо прогнози
+        if (typeof loadTechForecasts === 'function') {
+            await loadTechForecasts();
+        }
+
+    } catch(e) {
+        console.error('Помилка завантаження статусу тех. аналізу:', e);
+        // Показуємо тимчасові значення замість помилки
+        const balanceEl = document.getElementById('taBalance');
+        if (balanceEl) balanceEl.innerHTML = `$0`;
+        const pnlElem = document.getElementById('taPnl');
+        if (pnlElem) pnlElem.innerHTML = `$0`;
+        const winRateEl = document.getElementById('taWinRate');
+        if (winRateEl) winRateEl.innerHTML = `0%`;
+    }
+}
 
         async function loadTechForecastStats() {
             try {
