@@ -505,6 +505,8 @@ class ScalpStrategy(BaseStrategy):
                     sell_signals.append('vwap_overbought')
                     logger.debug(f"[{symbol}] Ціна значно вище VWAP (2σ) - сильна перекупленість")
 
+
+
             # Фінальний сигнал з додатковими фільтрами
             buy_signal = (
                     len(buy_signals) >= 3 and

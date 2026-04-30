@@ -463,7 +463,7 @@ class SignalStrategy(BaseStrategy):
 
             order_id = f"sig_order_{signal.id}"
 
-            # Зберігаємо ордер з ВСІМА даними сигналу
+            # ВИПРАВЛЕНО: правильне збереження ордера
             with get_db() as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO orders 
@@ -472,10 +472,11 @@ class SignalStrategy(BaseStrategy):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     order_id, self.strategy_id, signal.symbol, side, current_price, quantity, 'open',
-                    signal.signal_type, datetime.now().isoformat(),
+                    'Market',  # ← ВИПРАВЛЕНО: 'Market' замість signal.signal_type
+                    datetime.now().isoformat(),
                     signal.stop_loss,
                     ','.join(map(str, signal.take_profits)),
-                    signal.signal_type
+                    signal.signal_type  # signal_type зберігається окремо
                 ))
 
             signal.status = 'active'
