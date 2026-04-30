@@ -2026,14 +2026,97 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/tech_analysis/analyze', methods=['POST'])
     @async_route
     async def api_tech_analysis_analyze():
-        """Примусовий аналіз ринку"""
+        """Примусовий аналіз ринку для символу"""
         data = request.get_json()
         symbol = data.get('symbol')
+
+        if not symbol:
+            return jsonify({'error': 'Symbol is required', 'signal': 'neutral', 'confidence': 0}), 400
+
+        # Шукаємо стратегію tech_analysis
+        tech_strategy = None
         for strategy in trading_engine.strategies.values():
-            if strategy.name == 'tech_analysis' and hasattr(strategy, 'analyze_market'):
-                result = await strategy.analyze_market(symbol)
-                return jsonify(result)
-        return jsonify({'error': 'Strategy not found', 'signal': 'neutral', 'confidence': 0}), 404
+            if strategy.name == 'tech_analysis':
+                tech_strategy = strategy
+                break
+
+        if not tech_strategy:
+            return jsonify({'error': 'Tech Analysis strategy not found', 'signal': 'neutral', 'confidence': 0}), 404
+
+        try:
+            # Отримуємо індикатори для символу
+            if hasattr(tech_strategy, '_get_indicators'):
+                indicators = await tech_strategy._get_indicators(symbol)
+            else:
+                # Якщо методу немає, використовуємо простий аналіз
+                indicators = await simple_technical_analysis(trading_engine.exchange, symbol)
+
+            if not indicators:
+                return jsonify({
+                    'signal': 'neutral',
+                    'confidence': 0,
+                    'trend': 'neutral',
+                    'explanation': ['Не вдалося отримати дані для аналізу'],
+                    'target_price': 0,
+                    'current_price': 0
+                })
+
+            # Визначаємо сигнал
+            signal = 'neutral'
+            if indicators.get('buy_signal'):
+                signal = 'long'
+            elif indicators.get('sell_signal'):
+                signal = 'short'
+
+            # Розраховуємо цільову ціну
+            current_price = indicators.get('price', 0)
+            target_price = current_price
+            if signal == 'long':
+                target_price = current_price * (1 + (tech_strategy.take_profit_percent / 100))
+            elif signal == 'short':
+                target_price = current_price * (1 - (tech_strategy.take_profit_percent / 100))
+
+            # Формуємо пояснення
+            explanation = []
+            if indicators.get('ema_trend'):
+                explanation.append(f"📊 Тренд: {indicators['ema_trend']}")
+            if indicators.get('rsi'):
+                explanation.append(
+                    f"📈 RSI: {indicators['rsi']:.1f} ({'перекупленість' if indicators['rsi'] > 70 else 'перепроданість' if indicators['rsi'] < 30 else 'норма'})")
+            if indicators.get('confidence'):
+                explanation.append(f"🎯 Впевненість: {indicators['confidence']:.0f}%")
+
+            if signal == 'long':
+                explanation.append(f"🟢 Сигнал до КУПІВЛІ")
+            elif signal == 'short':
+                explanation.append(f"🔴 Сигнал до ПРОДАЖУ")
+            else:
+                explanation.append(f"⚪ Нейтральний сигнал")
+
+            return jsonify({
+                'signal': signal,
+                'confidence': indicators.get('confidence', 0),
+                'trend': indicators.get('trend', 'neutral'),
+                'explanation': explanation,
+                'target_price': round(target_price, 2),
+                'current_price': round(current_price, 2),
+                'indicators': {
+                    'rsi': round(indicators.get('rsi', 50), 1),
+                    'ema9': round(indicators.get('ema9', current_price), 2),
+                    'ema21': round(indicators.get('ema21', current_price), 2)
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Помилка аналізу {symbol}: {e}")
+            return jsonify({
+                'signal': 'neutral',
+                'confidence': 0,
+                'trend': 'neutral',
+                'explanation': [f'Помилка аналізу: {str(e)}'],
+                'target_price': 0,
+                'current_price': 0
+            }), 500
 
     @app.route('/api/tech_analysis/forecasts')
     @async_route
@@ -2041,10 +2124,15 @@ def create_flask_app(config, trading_engine):
         """Отримання прогнозів стратегії"""
         status = request.args.get('status', 'all')
         limit = request.args.get('limit', 20, type=int)
+
         for strategy in trading_engine.strategies.values():
-            if strategy.name == 'tech_analysis' and hasattr(strategy, 'get_forecasts'):
-                forecasts = await strategy.get_forecasts(status, limit)
-                return jsonify({'forecasts': forecasts})
+            if strategy.name == 'tech_analysis':
+                if hasattr(strategy, 'get_forecasts'):
+                    forecasts = await strategy.get_forecasts(status, limit)
+                    return jsonify({'forecasts': forecasts})
+                # Якщо методу немає, повертаємо пустий список
+                return jsonify({'forecasts': []})
+
         return jsonify({'forecasts': []})
 
     @app.route('/api/tech_analysis/forecasts/stats')
@@ -2052,10 +2140,47 @@ def create_flask_app(config, trading_engine):
     async def api_tech_analysis_forecasts_stats():
         """Статистика прогнозів"""
         for strategy in trading_engine.strategies.values():
-            if strategy.name == 'tech_analysis' and hasattr(strategy, 'get_forecast_stats'):
-                stats = await strategy.get_forecast_stats()
-                return jsonify(stats)
+            if strategy.name == 'tech_analysis':
+                if hasattr(strategy, 'get_forecast_stats'):
+                    stats = await strategy.get_forecast_stats()
+                    return jsonify(stats)
+                return jsonify({'accuracy': 0, 'active': 0, 'total': 0})
+
         return jsonify({'accuracy': 0, 'active': 0, 'total': 0})
+
+    @app.route('/api/tech_analysis/settings', methods=['POST'])
+    @async_route
+    async def api_tech_analysis_settings():
+        """Оновлення налаштувань стратегії"""
+        data = request.get_json()
+
+        for strategy in trading_engine.strategies.values():
+            if strategy.name == 'tech_analysis':
+                if hasattr(strategy, 'update_settings'):
+                    await strategy.update_settings(
+                        symbols=data.get('symbols'),
+                        trade_size_percent=data.get('trade_size_percent'),
+                        min_confidence=data.get('min_confidence'),
+                        stop_loss_percent=data.get('stop_loss_percent'),
+                        take_profit_percent=data.get('take_profit_percent'),
+                        timeframe=data.get('timeframe')
+                    )
+                else:
+                    # Пряме встановлення атрибутів
+                    if data.get('symbols'):
+                        strategy.symbols = data['symbols']
+                    if data.get('trade_size_percent'):
+                        strategy.trade_size_percent = data['trade_size_percent']
+                    if data.get('min_confidence'):
+                        strategy.min_confidence = data['min_confidence']
+                    if data.get('stop_loss_percent'):
+                        strategy.stop_loss_percent = data['stop_loss_percent']
+                    if data.get('take_profit_percent'):
+                        strategy.take_profit_percent = data['take_profit_percent']
+
+                return jsonify({'success': True})
+
+        return jsonify({'success': False, 'error': 'Strategy not found'}), 404
 
     # ============= [НОВЕ] PROMETHEUS METRICS API =============
 
