@@ -1729,6 +1729,32 @@ def create_flask_app(config, trading_engine):
 
         return jsonify(get_metrics_json())
 
+    @app.route('/api/system_status')
+    @async_route
+    async def api_system_status():
+        import psutil
+        start_time = getattr(trading_engine, 'start_time', None)
+        if not start_time:
+            start_time = time.time()
+            trading_engine.start_time = start_time
+        uptime_seconds = int(time.time() - start_time)
+        uptime_str = f"{uptime_seconds // 3600}г {(uptime_seconds % 3600) // 60}х {uptime_seconds % 60}с"
+        try:
+            return jsonify({
+                'cpu_percent': psutil.cpu_percent(interval=0.5),
+                'cpu_count': psutil.cpu_count(),
+                'ram_percent': psutil.virtual_memory().percent,
+                'ram_used_gb': round(psutil.virtual_memory().used / (1024 ** 3), 2),
+                'ram_total_gb': round(psutil.virtual_memory().total / (1024 ** 3), 2),
+                'disk_percent': psutil.disk_usage('/').percent,
+                'disk_used_gb': round(psutil.disk_usage('/').used / (1024 ** 3), 2),
+                'disk_total_gb': round(psutil.disk_usage('/').total / (1024 ** 3), 2),
+                'uptime': uptime_str,
+                'uptime_seconds': uptime_seconds
+            })
+        except Exception as e:
+            return jsonify({'error': str(e), 'uptime': uptime_str}), 500
+
     # ============= Перезапуск =============
 
     @app.route('/api/restart', methods=['POST'])
