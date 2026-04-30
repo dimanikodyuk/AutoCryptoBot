@@ -373,35 +373,7 @@
 
     <div class="strategies-grid" id="strategiesContainer"><div class="loading">Завантаження...</div></div>
 
-    <!-- Блок керування стратегією Технічного аналізу (стилізований як strategy-card) -->
-    <div id="taDashboardCard" class="strategy-card" style="margin-top: 20px; border-left-color: #9b59b6;">
-        <div class="strategy-header">
-            <span class="strategy-name">📊 ТЕХНІЧНИЙ АНАЛІЗ</span>
-            <span id="taQuickStatus" class="strategy-status status-inactive">❌ Зупинено</span>
-        </div>
-        <div class="strategy-stats">
-            <div class="strategy-stat">
-                <div class="strategy-stat-value" id="taQuickAccuracy">0%</div>
-                <div class="strategy-stat-label">Точність прогнозів</div>
-            </div>
-            <div class="strategy-stat">
-                <div class="strategy-stat-value" id="taQuickActive">0</div>
-                <div class="strategy-stat-label">Активні прогнози</div>
-            </div>
-            <div class="strategy-stat">
-                <div class="strategy-stat-value" id="taQuickPnl">$0</div>
-                <div class="strategy-stat-label">PnL</div>
-            </div>
-            <div class="strategy-stat">
-                <div class="strategy-stat-value" id="taQuickWinRate">0%</div>
-                <div class="strategy-stat-label">Win Rate</div>
-            </div>
-        </div>
-        <div class="strategy-actions">
-            <button class="btn-toggle" id="taQuickToggleBtn" onclick="quickToggleTechAnalysis()" style="background: #28a745;">✅ Запустити</button>
-            <button class="btn-reset" onclick="quickResetTechAnalysis()" style="background: #ff8800;">🔄 Скинути</button>
-        </div>
-    </div>
+
 
     <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
         <button class="btn-danger" onclick="emergencyStop()">🛑 ЕКСТРЕНА ЗУПИНКА</button>
