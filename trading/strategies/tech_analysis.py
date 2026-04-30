@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional
 from decimal import Decimal
+import uuid
 
 from trading.strategies.base import BaseStrategy
 from database.db import get_db, add_log
@@ -22,10 +23,10 @@ class TechAnalysisStrategy(BaseStrategy):
 
         self.symbols = saved.get('symbols', ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
         self.enabled = saved.get('enabled', False)
-        self.timeframe = saved.get('timeframe', '60')  # 1 година за замовчуванням
+        self.timeframe = saved.get('timeframe', '60')  # 1 година
 
         # Параметри торгівлі
-        self.trade_size_percent = saved.get('trade_size_percent', 50)  # 50% від балансу
+        self.trade_size_percent = saved.get('trade_size_percent', 50)
         self.take_profit_percent = saved.get('take_profit_percent', 4.0)
         self.stop_loss_percent = saved.get('stop_loss_percent', 2.0)
         self.min_confidence = saved.get('min_confidence', 65.0)
@@ -85,7 +86,6 @@ class TechAnalysisStrategy(BaseStrategy):
                 self.balance = 100.0
                 self._save_balance()
 
-            # Завантажуємо відкриті позиції
             orders = conn.execute(
                 "SELECT * FROM orders WHERE strategy_id=? AND status='open'",
                 (self.strategy_id,)
@@ -143,7 +143,6 @@ class TechAnalysisStrategy(BaseStrategy):
 
         for symbol in self.symbols:
             try:
-                # Отримуємо індикатори
                 indicators = await self._get_indicators(symbol)
                 if not indicators:
                     continue
@@ -151,11 +150,9 @@ class TechAnalysisStrategy(BaseStrategy):
                 price = indicators['price']
                 self.current_prices[symbol] = price
 
-                # Перевіряємо чи є відкрита позиція
                 if symbol in self.open_positions:
                     await self._check_exit(symbol, price)
                 else:
-                    # Перевіряємо сигнал на вхід
                     if indicators['buy_signal'] and indicators['confidence'] >= self.min_confidence:
                         await self._open_position(symbol, price, indicators)
                         signals_generated.append(f"{symbol}: BUY")
@@ -178,7 +175,6 @@ class TechAnalysisStrategy(BaseStrategy):
             closes = [k['close'] for k in klines]
             current_price = closes[-1]
 
-            # Простий аналіз (можна розширити)
             ema9 = self._calculate_ema(closes, 9)
             ema21 = self._calculate_ema(closes, 21)
             rsi = self._calculate_rsi(closes)
@@ -204,13 +200,12 @@ class TechAnalysisStrategy(BaseStrategy):
             elif rsi_overbought:
                 sell_signals += 1
 
-            # Розрахунок впевненості
             if buy_signals > sell_signals:
-                confidence = 50 + (buy_signals - sell_signals) * 25
+                confidence = min(95, 50 + (buy_signals - sell_signals) * 25)
                 buy_signal = confidence >= self.min_confidence
                 sell_signal = False
             elif sell_signals > buy_signals:
-                confidence = 50 + (sell_signals - buy_signals) * 25
+                confidence = min(95, 50 + (sell_signals - buy_signals) * 25)
                 buy_signal = False
                 sell_signal = confidence >= self.min_confidence
             else:
@@ -222,7 +217,7 @@ class TechAnalysisStrategy(BaseStrategy):
                 'price': current_price,
                 'ema9': current_ema9,
                 'ema21': current_ema21,
-                'rsi': rsi,
+                'rsi': round(rsi, 1),
                 'confidence': confidence,
                 'buy_signal': buy_signal,
                 'sell_signal': sell_signal,
@@ -265,23 +260,47 @@ class TechAnalysisStrategy(BaseStrategy):
         return 100 - (100 / (1 + rs))
 
     async def _open_position(self, symbol: str, price: float, indicators: dict, is_long: bool = True):
-        """Відкриття позиції"""
-        trade_size = self.balance * (self.trade_size_percent / 100)
-        quantity = trade_size / price
-        cost = quantity * price
+        """Відкриття позиції (віртуальне або реальне)"""
+        trade_amount = self.balance * (self.trade_size_percent / 100)
 
-        if self.available_balance < cost:
-            logger.warning(f"[TechAnalysis] Недостатньо балансу: потрібно ${cost:.2f}")
+        # Мінімальна сума угоди
+        if trade_amount < 10:
+            logger.warning(f"[TechAnalysis] Мінімальна сума угоди $10, поточна: ${trade_amount:.2f}")
+            trade_amount = 10
+
+        quantity = trade_amount / price
+
+        # Перевірка мінімальної кількості (для BTCUSDT мінімум 0.0001)
+        min_qty = 0.0001 if 'BTC' in symbol else 0.001
+        if quantity < min_qty:
+            quantity = min_qty
+            trade_amount = quantity * price
+            logger.info(f"[TechAnalysis] Коригуємо кількість до мінімальної: {quantity}")
+
+        if self.available_balance < trade_amount:
+            logger.warning(f"[TechAnalysis] Недостатньо балансу: потрібно ${trade_amount:.2f}, доступно ${self.available_balance:.2f}")
             return
 
         side = 'buy' if is_long else 'sell'
         order_id = f"ta_{symbol}_{int(datetime.now().timestamp())}_{self.strategy_id}"
 
-        result = await self.exchange.create_order(symbol, side, 'Market', quantity, price)
+        # ВИПРАВЛЕНО: використовуємо метод execute_trade замість create_order
+        # Оскільки це стратегія, вона працює через trading_engine
+        # Але тут у нас немає прямого доступу до trading_engine.
+        # Тому створюємо віртуальну угоду через self.exchange.execute_order
 
-        if result.get('error'):
-            logger.error(f"[TechAnalysis] Помилка відкриття позиції {symbol}: {result}")
-            return
+        # Для віртуальної торгівлі просто зберігаємо угоду в БД
+        # Реальна торгівля потребує окремого підходу
+
+        if self.mode == 'real':
+            # Реальна торгівля через exchange
+            result = await self.exchange.create_order(symbol, side, 'Market', quantity, price)
+            if result.get('error'):
+                logger.error(f"[TechAnalysis] Помилка відкриття позиції {symbol}: {result}")
+                return
+        else:
+            # Віртуальна торгівля - просто логуємо
+            logger.info(f"[TechAnalysis] ВІРТУАЛЬНА угода: {side} {quantity} {symbol} @ ${price:.2f}")
 
         self.open_positions[symbol] = {
             'order_id': order_id,
@@ -292,11 +311,11 @@ class TechAnalysisStrategy(BaseStrategy):
             'signal_type': 'LONG' if is_long else 'SHORT'
         }
 
-        self.locked_balance += cost
+        self.locked_balance += trade_amount
         self._save_order(order_id, symbol, side, price, quantity, 'open', 'LONG' if is_long else 'SHORT')
 
         signal_text = "LONG (КУПІВЛЯ)" if is_long else "SHORT (ПРОДАЖ)"
-        logger.info(f"[TechAnalysis] 📈 Відкрито позицію {symbol}: {signal_text} @ ${price:.2f}")
+        logger.info(f"[TechAnalysis] 📈 Відкрито позицію {symbol}: {signal_text} {quantity:.6f} @ ${price:.2f} (сума: ${trade_amount:.2f})")
 
         if self.telegram_bot:
             await self.telegram_bot.send_notification(
@@ -304,6 +323,8 @@ class TechAnalysisStrategy(BaseStrategy):
                 f"└ Пара: `{symbol}`\n"
                 f"└ Тип: {signal_text}\n"
                 f"└ Ціна: `${price:.2f}`\n"
+                f"└ Кількість: {quantity:.6f}\n"
+                f"└ Сума: `${trade_amount:.2f}`\n"
                 f"└ RSI: {indicators['rsi']:.1f}\n"
                 f"└ Впевненість: {indicators['confidence']:.0f}%",
                 parse_mode='Markdown'
@@ -323,10 +344,8 @@ class TechAnalysisStrategy(BaseStrategy):
 
         if side == 'buy':
             pnl_percent = (current_price - entry_price) / entry_price * 100
-            # Take Profit
             if pnl_percent >= self.take_profit_percent:
                 await self._close_position(symbol, current_price, "take_profit")
-            # Stop Loss
             elif pnl_percent <= -self.stop_loss_percent:
                 await self._close_position(symbol, current_price, "stop_loss")
         else:  # sell
@@ -342,24 +361,37 @@ class TechAnalysisStrategy(BaseStrategy):
         if not position:
             return
 
+        entry_price = position['entry_price']
+        quantity = position['quantity']
+        side = position['side']
+        order_id = position['order_id']
+
+        # Розрахунок PnL
+        if side == 'buy':
+            gross_pnl = (price - entry_price) * quantity
+        else:
+            gross_pnl = (entry_price - price) * quantity
+
+        commission_rate = 0.001
+        commission = (quantity * entry_price + quantity * price) * commission_rate
+        pnl = gross_pnl - commission
+        pnl_percent = (pnl / (quantity * entry_price)) * 100 if quantity * entry_price > 0 else 0
+
+        # Видаляємо з відкритих позицій
         del self.open_positions[symbol]
 
-        revenue = position['quantity'] * price
-        cost = position['quantity'] * position['entry_price']
-        commission_rate = 0.001
-        commission = (cost + revenue) * commission_rate
-        pnl = revenue - cost - commission
-        pnl_percent = ((price - position['entry_price']) / position['entry_price'] - commission_rate * 2) * 100
+        if self.mode == 'real':
+            close_side = 'sell' if side == 'buy' else 'buy'
+            result = await self.exchange.create_order(symbol, close_side, 'Market', quantity, price)
+            if result.get('error'):
+                logger.error(f"[TechAnalysis] Помилка закриття позиції {symbol}: {result}")
+                return
+        else:
+            logger.info(f"[TechAnalysis] ВІРТУАЛЬНЕ закриття: {symbol} @ ${price:.2f}")
 
-        result = await self.exchange.create_order(symbol, 'sell' if position['side'] == 'buy' else 'buy',
-                                                  'Market', position['quantity'], price)
-
-        if result.get('error'):
-            logger.error(f"[TechAnalysis] Помилка закриття позиції {symbol}: {result}")
-            return
-
-        self.balance += revenue - commission
-        self.locked_balance -= cost
+        # Оновлюємо баланс
+        self.balance += (quantity * price) - commission
+        self.locked_balance -= quantity * entry_price
         self.total_pnl += pnl
         self.total_trades += 1
 
@@ -368,22 +400,23 @@ class TechAnalysisStrategy(BaseStrategy):
         else:
             self.losing_trades += 1
 
+        # Оновлюємо ордер в БД
         with get_db() as conn:
             conn.execute("""
                 UPDATE orders SET status='closed', closed_at=?, closed_price=?, pnl=?, commission=?
                 WHERE order_id=?
-            """, (datetime.now().isoformat(), price, pnl, commission, position['order_id']))
+            """, (datetime.now().isoformat(), price, pnl, commission, order_id))
 
         reason_text = "🎯 Take Profit" if reason == "take_profit" else "🛑 Stop Loss"
         pnl_icon = "✅" if pnl >= 0 else "❌"
 
-        logger.info(f"[TechAnalysis] 📉 Закрито позицію {symbol}: {reason_text}, PnL: {pnl_icon} ${pnl:.2f}")
+        logger.info(f"[TechAnalysis] 📉 Закрито позицію {symbol}: {reason_text}, PnL: {pnl_icon} ${pnl:.2f} ({pnl_percent:+.2f}%)")
 
         if self.telegram_bot:
             await self.telegram_bot.send_notification(
                 f"📉 *ЗАКРИТО ПОЗИЦІЮ* (TechAnalysis)\n"
                 f"└ Пара: `{symbol}`\n"
-                f"└ Ціна входу: `${position['entry_price']:.2f}`\n"
+                f"└ Ціна входу: `${entry_price:.2f}`\n"
                 f"└ Ціна виходу: `${price:.2f}`\n"
                 f"└ PnL: {pnl_icon} `${pnl:.2f}` ({pnl_percent:+.2f}%)\n"
                 f"└ Причина: {reason_text}",
@@ -418,7 +451,13 @@ class TechAnalysisStrategy(BaseStrategy):
             'daily_trades_count': self.daily_trades_count,
             'max_daily_trades': self.max_daily_trades,
             'is_blocked': self._is_blocked,
-            'block_reason': self._block_reason
+            'block_reason': self._block_reason,
+            'settings': {
+                'trade_size_percent': self.trade_size_percent,
+                'min_confidence': self.min_confidence,
+                'stop_loss_percent': self.stop_loss_percent,
+                'take_profit_percent': self.take_profit_percent
+            }
         }
 
     async def reset(self):
@@ -463,7 +502,7 @@ class TechAnalysisStrategy(BaseStrategy):
         if symbols is not None:
             self.symbols = symbols
         if trade_size_percent is not None:
-            self.trade_size_percent = trade_size_percent
+            self.trade_size_percent = max(10, min(90, trade_size_percent))
         if take_profit_percent is not None:
             self.take_profit_percent = take_profit_percent
         if stop_loss_percent is not None:
@@ -480,4 +519,5 @@ class TechAnalysisStrategy(BaseStrategy):
                                stop_loss_percent=self.stop_loss_percent,
                                min_confidence=self.min_confidence,
                                timeframe=self.timeframe)
+        logger.info(f"Оновлено налаштування TechAnalysis: trade_size={self.trade_size_percent}%, TP={self.take_profit_percent}%, SL={self.stop_loss_percent}%")
         return True
