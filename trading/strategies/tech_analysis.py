@@ -291,55 +291,98 @@ class TechAnalysisStrategy(BaseStrategy):
                 return None
 
             closes = [k['close'] for k in klines]
+            highs  = [k['high']  for k in klines]
+            lows   = [k['low']   for k in klines]
             current_price = closes[-1]
 
-            ema9 = self._calculate_ema(closes, 9)
+            ema9  = self._calculate_ema(closes, 9)
             ema21 = self._calculate_ema(closes, 21)
-            rsi = self._calculate_rsi(closes)
+            ema50 = self._calculate_ema(closes, 50)
+            rsi   = self._calculate_rsi(closes)
 
-            current_ema9 = ema9[-1] if ema9 else current_price
+            current_ema9  = ema9[-1]  if ema9  else current_price
             current_ema21 = ema21[-1] if ema21 else current_price
+            current_ema50 = ema50[-1] if ema50 else current_price
 
-            ema_trend_up = current_ema9 > current_ema21
-            rsi_oversold = rsi < 30
-            rsi_overbought = rsi > 70
+            # --- Тренд вищого порядку (EMA21 vs EMA50) ---
+            macro_trend_up   = current_ema21 > current_ema50
+            macro_trend_down = current_ema21 < current_ema50
 
-            confidence = 0
-            buy_signals = 0
-            sell_signals = 0
+            # --- EMA crossover (EMA9 vs EMA21) ---
+            ema_cross_up   = current_ema9 > current_ema21
+            ema_cross_down = current_ema9 < current_ema21
 
-            if ema_trend_up:
-                buy_signals += 1
-            else:
-                sell_signals += 1
+            # --- Позиція ціни відносно EMA ---
+            # Купівля має сенс коли ціна на відкаті (біля або нижче EMA21), не коли вже на піку
+            price_below_ema21 = current_price < current_ema21 * 1.002
+            price_above_ema21 = current_price > current_ema21 * 0.998
 
-            if rsi_oversold:
-                buy_signals += 1
-            elif rsi_overbought:
-                sell_signals += 1
+            # --- RSI зони ---
+            rsi_oversold      = rsi < 35   # перепроданість — хороший момент для купівлі
+            rsi_near_oversold = rsi < 45
+            rsi_overbought    = rsi > 65   # перекупленість — хороший момент для шорту
+            rsi_near_ob       = rsi > 55
 
-            if buy_signals > sell_signals:
-                confidence = min(95, 50 + (buy_signals - sell_signals) * 25)
-                buy_signal = confidence >= self.min_confidence
+            # --- Скор КУПІВЛІ ---
+            # Купуємо: макротренд вгору + ціна на відкаті + RSI не перекуплений
+            buy_score = 0
+            if macro_trend_up:        buy_score += 2  # головна умова
+            if ema_cross_up:          buy_score += 1  # підтвердження
+            if price_below_ema21:     buy_score += 1  # купуємо на відкаті, не на піку
+            if rsi_oversold:          buy_score += 2  # сильний сигнал
+            elif rsi_near_oversold:   buy_score += 1
+            if rsi_overbought:        buy_score -= 3  # не купуємо на піку RSI
+            elif rsi_near_ob:         buy_score -= 1
+
+            # --- Скор ПРОДАЖУ (SHORT) ---
+            # Шортимо: макротренд вниз + ціна на відскоку + RSI не перепроданий
+            sell_score = 0
+            if macro_trend_down:      sell_score += 2
+            if ema_cross_down:        sell_score += 1
+            if price_above_ema21:     sell_score += 1  # продаємо на відскоку
+            if rsi_overbought:        sell_score += 2
+            elif rsi_near_ob:         sell_score += 1
+            if rsi_oversold:          sell_score -= 3  # не шортимо на дні
+            elif rsi_near_oversold:   sell_score -= 1
+
+            # --- Розрахунок сигналу ---
+            MIN_SCORE = 4
+            MAX_SCORE = 6
+
+            if buy_score >= MIN_SCORE and buy_score > sell_score:
+                confidence  = min(95, 50 + int((buy_score / MAX_SCORE) * 45))
+                buy_signal  = confidence >= self.min_confidence
                 sell_signal = False
-            elif sell_signals > buy_signals:
-                confidence = min(95, 50 + (sell_signals - buy_signals) * 25)
-                buy_signal = False
+            elif sell_score >= MIN_SCORE and sell_score > buy_score:
+                confidence  = min(95, 50 + int((sell_score / MAX_SCORE) * 45))
+                buy_signal  = False
                 sell_signal = confidence >= self.min_confidence
             else:
-                confidence = 50
-                buy_signal = False
+                confidence  = 50
+                buy_signal  = False
                 sell_signal = False
 
+            trend = 'bullish' if macro_trend_up else ('bearish' if macro_trend_down else 'neutral')
+
+            logger.debug(
+                f"[TechAnalysis] {symbol} | price=${current_price:.2f} "
+                f"ema9={current_ema9:.2f} ema21={current_ema21:.2f} ema50={current_ema50:.2f} "
+                f"rsi={rsi:.1f} | buy_score={buy_score} sell_score={sell_score} "
+                f"conf={confidence}% | buy={buy_signal} sell={sell_signal}"
+            )
+
             return {
-                'price': current_price,
-                'ema9': current_ema9,
-                'ema21': current_ema21,
-                'rsi': round(rsi, 1),
-                'confidence': confidence,
-                'buy_signal': buy_signal,
+                'price':       current_price,
+                'ema9':        current_ema9,
+                'ema21':       current_ema21,
+                'ema50':       current_ema50,
+                'rsi':         round(rsi, 1),
+                'confidence':  confidence,
+                'buy_signal':  buy_signal,
                 'sell_signal': sell_signal,
-                'trend': 'bullish' if ema_trend_up else 'bearish'
+                'buy_score':   buy_score,
+                'sell_score':  sell_score,
+                'trend':       trend,
             }
 
         except Exception as e:
