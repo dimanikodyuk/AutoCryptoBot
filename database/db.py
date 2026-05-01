@@ -79,6 +79,8 @@ def init_db():
                 closed_at TIMESTAMP,
                 closed_price REAL,
                 signal_type TEXT,
+                stop_loss REAL,
+                take_profit REAL,
                 FOREIGN KEY (strategy_id) REFERENCES strategies(id)
             )
         ''')
@@ -236,12 +238,15 @@ def init_db():
         # Додавання стратегій за замовчуванням
         cursor.execute("SELECT COUNT(*) FROM strategies")
         if cursor.fetchone()[0] == 0:
-            strategies = ['grid', 'news', 'scalp', 'signals']
+            strategies = ['grid', 'news', 'scalp', 'signals', 'tech_analysis']
             for s in strategies:
-                cursor.execute(
-                    "INSERT INTO strategies (name, enabled, mode) VALUES (?, ?, ?)",
-                    (s, 0, 'simulation')
-                )
+                cursor.execute("SELECT id FROM strategies WHERE name = ?", (s,))
+                if not cursor.fetchone():
+                    cursor.execute(
+                        "INSERT INTO strategies (name, enabled, mode) VALUES (?, ?, ?)",
+                        (s, 0, 'simulation')
+                    )
+                    print(f"✅ Додано стратегію {s}")
 
         # Додавання налаштувань логів за замовчуванням
         default_modules = ['main', 'engine', 'exchange', 'grid', 'grid_manager', 'scalp', 'news', 'web', 'telegram',

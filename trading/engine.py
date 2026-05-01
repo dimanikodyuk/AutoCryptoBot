@@ -108,13 +108,13 @@ class TradingEngine:
 
 
                 # В кінці списку стратегій, після signals, додайте:
-
                 elif s['name'] == 'tech_analysis':
                     strategy = TechAnalysisStrategy(
                         strategy_id=s['id'],
                         name=s['name'],
                         mode=self.config.DEFAULT_MODE,
                         exchange=self.exchange
+
                     )
 
                     strategy.max_daily_drawdown = self.config.MAX_DAILY_DRAWDOWN

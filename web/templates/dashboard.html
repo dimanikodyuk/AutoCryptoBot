@@ -351,7 +351,6 @@
 
     <div class="container">
         <!-- Дашборд -->
-        <!-- Дашборд -->
 <div id="tab-dashboard" class="tab-content active">
     <div class="prices-widget" id="pricesWidget">
         <div class="prices-header">
@@ -371,15 +370,17 @@
         <div class="stat-card"><div class="stat-value" id="totalTrades">0</div><div class="stat-label">Всього угод</div></div>
     </div>
 
-    <div class="strategies-grid" id="strategiesContainer"><div class="loading">Завантаження...</div></div>
-
-
+    <!-- ВСІ СТРАТЕГІЇ В ОДНІЙ СІТЦІ -->
+    <div class="strategies-grid" id="strategiesContainer">
+        <div class="loading">Завантаження...</div>
+    </div>
 
     <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
         <button class="btn-danger" onclick="emergencyStop()">🛑 ЕКСТРЕНА ЗУПИНКА</button>
         <button class="btn-refresh" onclick="loadAllData()">🔄 Оновити</button>
         <button onclick="resetAllStrategies()" style="background: #ff8800;">🔄 Скинути всі</button>
     </div>
+
 </div>
 
         <!-- Модальне вікно налаштувань цін -->
@@ -717,29 +718,66 @@
             </div>
 
             <!-- Графік з технічним аналізом -->
-            <div class="chart-card">
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 15px;">
-                    <h3>📈 Технічний аналіз</h3>
-                    <div style="display: flex; gap: 10px;">
-                        <select id="taChartSymbol" onchange="loadTechChart()" style="background: #0f0f1a; border: 1px solid #2a2a4a; color: white; padding: 6px 12px; border-radius: 8px;">
-                            <option value="BTCUSDT">BTC/USDT</option>
-                            <option value="ETHUSDT">ETH/USDT</option>
-                            <option value="SOLUSDT">SOL/USDT</option>
-                        </select>
-                        <select id="taChartInterval" onchange="loadTechChart()" style="background: #0f0f1a; border: 1px solid #2a2a4a; color: white; padding: 6px 12px; border-radius: 8px;">
-                            <option value="1">1 хвилина</option>
-                            <option value="5">5 хвилин</option>
-                            <option value="15" selected>15 хвилин</option>
-                            <option value="60">1 година</option>
-                            <option value="240">4 години</option>
-                            <option value="D">День</option>
-                        </select>
-                        <button class="btn-refresh" onclick="runTechAnalysis()">🔍 Виконати аналіз</button>
-                    </div>
-                </div>
-                <div id="techChartContainer" style="height: 500px;"></div>
-                <div id="techAnalysisResult" style="margin-top: 15px; padding: 15px; background: #0f0f1a; border-radius: 12px;"></div>
-            </div>
+<div class="chart-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 15px;">
+        <h3>📈 Технічний аналіз</h3>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <select id="taChartSymbol" onchange="loadTechChart()" style="background: #0f0f1a; border: 1px solid #2a2a4a; color: white; padding: 6px 12px; border-radius: 8px;">
+                <option value="BTCUSDT">BTC/USDT</option>
+                <option value="ETHUSDT">ETH/USDT</option>
+                <option value="SOLUSDT">SOL/USDT</option>
+            </select>
+            <select id="taChartInterval" onchange="loadTechChart()" style="background: #0f0f1a; border: 1px solid #2a2a4a; color: white; padding: 6px 12px; border-radius: 8px;">
+                <option value="1">1 хвилина</option>
+                <option value="5">5 хвилин</option>
+                <option value="15" selected>15 хвилин</option>
+                <option value="60">1 година</option>
+                <option value="240">4 години</option>
+                <option value="D">День</option>
+            </select>
+            <button class="btn-refresh" onclick="runTechAnalysis()">🔍 Виконати аналіз</button>
+        </div>
+    </div>
+
+    <!-- Панель фільтрації патернів та рівнів -->
+    <div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; padding: 10px; background: #0f0f1a; border-radius: 8px;">
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <span style="color: #888;">📊 Показати:</span>
+            <label style="display: flex; align-items: center; gap: 5px;">
+                <input type="checkbox" id="showResistance" checked onchange="loadTechChart()"> <span style="color: #ff8888;">🛑 Опори</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 5px;">
+                <input type="checkbox" id="showSupport" checked onchange="loadTechChart()"> <span style="color: #88ff88;">🟢 Підтримки</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 5px;">
+                <input type="checkbox" id="showCurrentPrice" checked onchange="loadTechChart()"> <span style="color: #00d4ff;">💰 Поточна ціна</span>
+            </label>
+        </div>
+        <div style="width: 1px; background: #2a2a4a;"></div>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+    <span style="color: #888;">🕯 Патерни:</span>
+    <label style="display: flex; align-items: center; gap: 5px;">
+        <input type="checkbox" id="showPinBar" onchange="loadTechChart()"> <span style="color: #ff4444;">📌 Пін-бар</span>
+    </label>
+    <label style="display: flex; align-items: center; gap: 5px;">
+        <input type="checkbox" id="showHammer" onchange="loadTechChart()"> <span style="color: #00ff88;">🔨 Молот</span>
+    </label>
+    <label style="display: flex; align-items: center; gap: 5px;">
+        <input type="checkbox" id="showEngulfing" onchange="loadTechChart()"> <span style="color: #ffaa00;">📈 Поглинання</span>
+    </label>
+    <label style="display: flex; align-items: center; gap: 5px;">
+        <input type="checkbox" id="showDoji" onchange="loadTechChart()"> <span style="color: #ffaa00;">⚪ Доджі</span>
+    </label>
+</div>
+        <div style="display: flex; gap: 10px;">
+            <button onclick="toggleAllPatterns(true)" style="background: #28a745; padding: 4px 12px;">✅ Всі патерни</button>
+            <button onclick="toggleAllPatterns(false)" style="background: #dc3545; padding: 4px 12px;">❌ Всі патерни</button>
+        </div>
+    </div>
+
+    <div id="techChartContainer" style="height: 500px;"></div>
+    <div id="techAnalysisResult" style="margin-top: 15px; padding: 15px; background: #0f0f1a; border-radius: 12px;"></div>
+</div>
 
             <!-- Активні прогнози - на всю ширину -->
             <div style="margin-top: 30px;">
@@ -774,7 +812,7 @@
                 <div id="taAccuracyChart" style="height: 350px;"></div>
             </div>
 
-            <!-- Угоди технічного аналізу -->
+           <!-- Угоди технічного аналізу -->
             <div style="margin-top: 30px;">
                 <h3>📋 Угоди технічного аналізу</h3>
                 <div class="filter-bar">
@@ -3142,6 +3180,31 @@ async function updateScalpPnL() {
     }
 }
 
+        function toggleAllPatterns(show) {
+    const patternIds = ['showPinBar', 'showHammer', 'showEngulfing', 'showDoji'];
+    patternIds.forEach(id => {
+        const cb = document.getElementById(id);
+        if (cb) cb.checked = show;
+    });
+    loadTechChart();
+}
+
+
+        function filterPatternsByType(patterns) {
+    const showPinBar = document.getElementById('showPinBar')?.checked ?? true;
+    const showHammer = document.getElementById('showHammer')?.checked ?? true;
+    const showEngulfing = document.getElementById('showEngulfing')?.checked ?? true;
+    const showDoji = document.getElementById('showDoji')?.checked ?? true;
+
+    return patterns.filter(p => {
+        if (p.name.includes('ПІН-БАР') || p.name.includes('PIN')) return showPinBar;
+        if (p.name.includes('МОЛОТ') || p.name.includes('HAMMER')) return showHammer;
+        if (p.name.includes('ПОГЛИНАННЯ') || p.name.includes('ENGULFING')) return showEngulfing;
+        if (p.name.includes('ДОДЖІ') || p.name.includes('DOJI')) return showDoji;
+        return true;
+    });
+}
+
         async function loadTechForecastStats() {
             try {
                 const response = await fetch('/api/tech_analysis/forecasts/stats');
@@ -3294,13 +3357,22 @@ async function updateScalpPnL() {
         }
 
         async function toggleTechAnalysis() {
-            try {
-                const response = await fetch('/api/tech_analysis/toggle', { method: 'POST' });
-                const data = await response.json();
-                if (data.success) { alert(data.message); loadTechAnalysisStatus(); }
-                else alert('❌ Помилка: ' + (data.error || 'невідома'));
-            } catch(e) { console.error(e); alert('❌ Помилка: ' + e.message); }
+    try {
+        const response = await fetch('/api/tech_analysis/toggle', { method: 'POST' });
+        const data = await response.json();
+
+        if (data.success) {
+            const message = data.enabled ? '✅ Стратегію технічного аналізу ЗАПУЩЕНО' : '⏸️ Стратегію технічного аналізу ЗУПИНЕНО';
+            alert(message);
+            loadTechAnalysisStatus();
+        } else {
+            alert('❌ Помилка: ' + (data.error || 'невідома'));
         }
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка: ' + e.message);
+    }
+}
 
         async function resetTechAnalysis() {
             if (!confirm('⚠️ Скинути стратегію технічного аналізу? Всі дані будуть втрачені!')) return;
@@ -3329,36 +3401,467 @@ async function updateScalpPnL() {
             } catch(e) { console.error('Помилка аналізу:', e); const resultDiv = document.getElementById('techAnalysisResult'); if (resultDiv) resultDiv.innerHTML = `<div class="loading">❌ Помилка аналізу: ${e.message}</div>`; }
         }
 
+        // Розрахунок рівнів підтримки та опору
+    function calculateSupportResistance(klines, lookback = 20, sensitivity = 2) {
+    if (!klines || klines.length < lookback) return { support: [], resistance: [] };
+
+    const highs = klines.map(k => k.high);
+    const lows = klines.map(k => k.low);
+
+    const resistanceLevels = [];
+    const supportLevels = [];
+
+    // Шукаємо піки (опори)
+    for (let i = sensitivity; i < highs.length - sensitivity; i++) {
+        let isPeak = true;
+        for (let j = i - sensitivity; j <= i + sensitivity; j++) {
+            if (j !== i && highs[j] >= highs[i]) {
+                isPeak = false;
+                break;
+            }
+        }
+        if (isPeak && highs[i] > 0) {
+            const price = highs[i];
+            let exists = false;
+            for (let r of resistanceLevels) {
+                if (Math.abs(r.price - price) / price < 0.005) {
+                    r.count++;
+                    r.strength = Math.min(3, r.count);
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                resistanceLevels.push({ price: price, count: 1, strength: 1, index: i });
+            }
+        }
+    }
+
+
+
+    // Шукаємо западини (підтримки)
+    for (let i = sensitivity; i < lows.length - sensitivity; i++) {
+        let isTrough = true;
+        for (let j = i - sensitivity; j <= i + sensitivity; j++) {
+            if (j !== i && lows[j] <= lows[i]) {
+                isTrough = false;
+                break;
+            }
+        }
+        if (isTrough && lows[i] > 0) {
+            const price = lows[i];
+            let exists = false;
+            for (let s of supportLevels) {
+                if (Math.abs(s.price - price) / price < 0.005) {
+                    s.count++;
+                    s.strength = Math.min(3, s.count);
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                supportLevels.push({ price: price, count: 1, strength: 1, index: i });
+            }
+        }
+    }
+
+    // Сортуємо за силою (вищі рівні)
+    resistanceLevels.sort((a, b) => b.strength - a.strength);
+    supportLevels.sort((a, b) => b.strength - a.strength);
+
+    // Повертаємо топ-3 найсильніших рівнів
+    return {
+        resistance: resistanceLevels.slice(0, 3).map(r => ({ price: r.price, strength: r.strength })),
+        support: supportLevels.slice(0, 3).map(s => ({ price: s.price, strength: s.strength }))
+    };
+}
+
         async function loadTechChart() {
-            const symbol = document.getElementById('taChartSymbol')?.value;
-            const interval = document.getElementById('taChartInterval')?.value || '15';
-            let limit = 100;
-            switch(interval) { case '1': limit = 100; break; case '5': limit = 100; break; case '15': limit = 100; break; case '60': limit = 72; break; case '240': limit = 60; break; case 'D': limit = 50; break; default: limit = 100; }
-            try {
-                const response = await fetch(`/api/klines/${symbol}?interval=${interval}&limit=${limit}`);
-                let data = await response.json();
-                if (!data || data.length === 0) { const chartEl = document.getElementById('techChartContainer'); if (chartEl) chartEl.innerHTML = '<div class="loading">Немає даних для графіка</div>'; return; }
-                data.sort((a, b) => a.timestamp - b.timestamp);
-                const timestamps = data.map(k => new Date(k.timestamp).toLocaleString());
-                const close = data.map(k => k.close);
-                const ema9 = calculateEMA(close, 9);
-                const ema21 = calculateEMA(close, 21);
-                const traces = [{ x: timestamps, y: close, type: 'scatter', mode: 'lines', name: 'Ціна', line: { color: '#00d4ff', width: 2 } }, { x: timestamps, y: ema9, type: 'scatter', mode: 'lines', name: 'EMA 9', line: { color: '#ffaa00', width: 1.5, dash: 'dash' } }, { x: timestamps, y: ema21, type: 'scatter', mode: 'lines', name: 'EMA 21', line: { color: '#aa88ff', width: 1.5, dash: 'dash' } }];
-                const layout = { title: `${symbol} - Технічний аналіз`, paper_bgcolor: '#1a1a2e', plot_bgcolor: '#1a1a2e', font: { color: '#e0e0e0' }, xaxis: { title: 'Час', gridcolor: '#2a2a4a', tickangle: -45, type: 'category' }, yaxis: { title: 'Ціна (USDT)', gridcolor: '#2a2a4a', tickprefix: '$' }, hovermode: 'x', margin: { l: 70, r: 70, t: 50, b: 80 }, legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(0,0,0,0.6)' } };
-                const chartDiv = document.getElementById('techChartContainer');
-                if (chartDiv) { Plotly.purge(chartDiv); Plotly.newPlot(chartDiv, traces, layout, { responsive: true }); }
-            } catch(e) { console.error('Помилка завантаження графіка:', e); const chartDiv = document.getElementById('techChartContainer'); if (chartDiv) chartDiv.innerHTML = '<div class="loading">❌ Помилка завантаження графіка</div>'; }
+    const symbol = document.getElementById('taChartSymbol')?.value || 'BTCUSDT';
+    const interval = document.getElementById('taChartInterval')?.value || '15';
+    let limit = 100;
+    switch(interval) {
+        case '1': limit = 100; break;
+        case '5': limit = 100; break;
+        case '15': limit = 100; break;
+        case '60': limit = 72; break;
+        case '240': limit = 60; break;
+        case 'D': limit = 50; break;
+        default: limit = 100;
+    }
+
+    try {
+        const response = await fetch(`/api/klines/${symbol}?interval=${interval}&limit=${limit}`);
+        let data = await response.json();
+
+        if (!data || data.length === 0) {
+            const chartEl = document.getElementById('techChartContainer');
+            if (chartEl) chartEl.innerHTML = '<div class="loading">Немає даних для графіка</div>';
+            return;
         }
 
-        function calculateEMA(data, period) {
-            const result = [];
-            if (data.length < period) return result;
-            const k = 2 / (period + 1);
-            let ema = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
-            result[period - 1] = ema;
-            for (let i = period; i < data.length; i++) { ema = data[i] * k + ema * (1 - k); result[i] = ema; }
-            return result;
+        data.sort((a, b) => a.timestamp - b.timestamp);
+
+        // Отримуємо налаштування видимості
+        const showResistance = document.getElementById('showResistance')?.checked ?? true;
+        const showSupport = document.getElementById('showSupport')?.checked ?? true;
+        const showCurrentPrice = document.getElementById('showCurrentPrice')?.checked ?? true;
+
+        // Розпізнаємо та фільтруємо патерни
+        let patterns = detectCandlePatternsWithIndex(data);
+        patterns = filterPatternsByType(patterns);
+        //console.log('Знайдені патерни:', patterns);
+
+        // Розраховуємо рівні підтримки та опору
+        const levels = calculateSupportResistance(data, 20, 2);
+
+        const timestamps = data.map(k => new Date(k.timestamp).toLocaleString());
+        const opens = data.map(k => k.open);
+        const highs = data.map(k => k.high);
+        const lows = data.map(k => k.low);
+        const closes = data.map(k => k.close);
+        const currentPrice = closes[closes.length - 1];
+
+        // Свічковий графік
+        const traces = [{
+            type: 'candlestick',
+            x: timestamps,
+            open: opens,
+            high: highs,
+            low: lows,
+            close: closes,
+            name: `${symbol}`,
+            increasing: { line: { color: '#00ff88', width: 1 }, fillcolor: '#00ff8844' },
+            decreasing: { line: { color: '#ff4444', width: 1 }, fillcolor: '#ff444444' },
+            whiskerwidth: 0.5,
+            line: { width: 1 },
+            yaxis: 'y'
+        }];
+
+        // EMA індикатори
+        const ema9 = calculateEMA(closes, 9);
+        const ema21 = calculateEMA(closes, 21);
+
+        traces.push({
+            type: 'scatter', mode: 'lines', x: timestamps, y: ema9,
+            name: 'EMA 9', line: { color: '#ffaa00', width: 1.5, dash: 'solid' }, yaxis: 'y'
+        });
+        traces.push({
+            type: 'scatter', mode: 'lines', x: timestamps, y: ema21,
+            name: 'EMA 21', line: { color: '#aa88ff', width: 1.5, dash: 'solid' }, yaxis: 'y'
+        });
+
+        const shapes = [];
+        const annotations = [];
+
+        // Лінії опору
+        if (showResistance) {
+            levels.resistance.forEach((level) => {
+                const lineColor = `rgba(255, 68, 68, ${0.5 + level.strength * 0.15})`;
+                shapes.push({
+                    type: 'line',
+                    x0: 0,
+                    x1: 1,
+                    xref: 'paper',
+                    y0: level.price,
+                    y1: level.price,
+                    yref: 'y',
+                    line: { color: lineColor, width: 1.5 + level.strength * 0.5, dash: 'dash' }
+                });
+
+                const isNear = Math.abs(currentPrice - level.price) / currentPrice < 0.03;
+                annotations.push({
+                    x: 1,
+                    y: level.price,
+                    xref: 'paper',
+                    yref: 'y',
+                    text: `🛑 ОПІР $${level.price.toFixed(2)}${isNear ? ' ⚡' : ''}`,
+                    showarrow: false,
+                    xanchor: 'right',
+                    font: { color: '#ff8888', size: 10 },
+                    bgcolor: 'rgba(0,0,0,0.5)',
+                    bordercolor: '#ff4444',
+                    borderwidth: 1,
+                    borderpad: 2
+                });
+            });
         }
+
+        // Лінії підтримки
+        if (showSupport) {
+            levels.support.forEach((level) => {
+                const lineColor = `rgba(0, 255, 136, ${0.5 + level.strength * 0.15})`;
+                shapes.push({
+                    type: 'line',
+                    x0: 0,
+                    x1: 1,
+                    xref: 'paper',
+                    y0: level.price,
+                    y1: level.price,
+                    yref: 'y',
+                    line: { color: lineColor, width: 1.5 + level.strength * 0.5, dash: 'dash' }
+                });
+
+                const isNear = Math.abs(currentPrice - level.price) / currentPrice < 0.03;
+                annotations.push({
+                    x: 0,
+                    y: level.price,
+                    xref: 'paper',
+                    yref: 'y',
+                    text: `${isNear ? '⚡ ' : ''}🟢 ПІДТРИМКА $${level.price.toFixed(2)}`,
+                    showarrow: false,
+                    xanchor: 'left',
+                    font: { color: '#88ff88', size: 10 },
+                    bgcolor: 'rgba(0,0,0,0.5)',
+                    bordercolor: '#00ff88',
+                    borderwidth: 1,
+                    borderpad: 2
+                });
+            });
+        }
+
+        // Поточна ціна
+        if (showCurrentPrice) {
+            shapes.push({
+                type: 'line',
+                x0: 0,
+                x1: 1,
+                xref: 'paper',
+                y0: currentPrice,
+                y1: currentPrice,
+                yref: 'y',
+                line: { color: '#00d4ff', width: 2, dash: 'solid' }
+            });
+            annotations.push({
+                x: 1,
+                y: currentPrice,
+                xref: 'paper',
+                yref: 'y',
+                text: `💰 CURRENT $${currentPrice.toFixed(2)}`,
+                showarrow: false,
+                xanchor: 'right',
+                font: { color: '#00d4ff', size: 11, weight: 'bold' },
+                bgcolor: 'rgba(0,0,0,0.6)',
+                bordercolor: '#00d4ff',
+                borderwidth: 1,
+                borderpad: 3
+            });
+        }
+
+        // Патерни (з урахуванням фільтрації)
+        patterns.forEach((pattern) => {
+            const patternTime = timestamps[pattern.index];
+            if (patternTime) {
+                annotations.push({
+                    x: patternTime,
+                    y: pattern.y,
+                    xref: 'x',
+                    yref: 'y',
+                    text: pattern.name,
+                    showarrow: true,
+                    arrowhead: pattern.ay > 0 ? 1 : 2,
+                    arrowsize: 1.2,
+                    arrowwidth: 2,
+                    arrowcolor: pattern.color,
+                    ax: 0,
+                    ay: pattern.ay,
+                    bgcolor: pattern.color + '22',
+                    bordercolor: pattern.color,
+                    borderwidth: 1,
+                    font: { color: '#fff', size: 9 }
+                });
+            }
+        });
+
+        const layout = {
+            title: `${symbol} - Технічний аналіз (${interval} хв)`,
+            paper_bgcolor: '#1a1a2e',
+            plot_bgcolor: '#1a1a2e',
+            font: { color: '#e0e0e0' },
+            xaxis: {
+                title: 'Час',
+                gridcolor: '#2a2a4a',
+                tickangle: -45,
+                type: 'category',
+                rangeslider: { visible: false }
+            },
+            yaxis: {
+                title: 'Ціна (USDT)',
+                gridcolor: '#2a2a4a',
+                tickprefix: '$',
+                side: 'right'
+            },
+            hovermode: 'x unified',
+            margin: { l: 90, r: 90, t: 60, b: 80 },
+            legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(0,0,0,0.6)' },
+            shapes: shapes,
+            annotations: annotations
+        };
+
+        const chartDiv = document.getElementById('techChartContainer');
+        if (chartDiv) {
+            Plotly.purge(chartDiv);
+            Plotly.newPlot(chartDiv, traces, layout, { responsive: true, scrollZoom: true });
+        }
+
+        // Оновлюємо блок з результатами
+        const resultDiv = document.getElementById('techAnalysisResult');
+        if (resultDiv) {
+            let html = '<div style="padding: 10px; background: #0f0f1a; border-radius: 8px;">';
+
+            if (levels.resistance.length > 0 || levels.support.length > 0) {
+                html += '<div style="margin-bottom: 10px;"><strong>📊 Ключові рівні:</strong><br>';
+                if (levels.resistance.length > 0) {
+                    html += '<span style="color: #ff8888;">🛑 Опір: </span>';
+                    html += levels.resistance.map(r => `$${r.price.toFixed(2)}`).join(', ');
+                    html += '<br>';
+                }
+                if (levels.support.length > 0) {
+                    html += '<span style="color: #88ff88;">🟢 Підтримка: </span>';
+                    html += levels.support.map(s => `$${s.price.toFixed(2)}`).join(', ');
+                    html += '<br>';
+                }
+                html += `<span style="color: #00d4ff;">💰 Поточна ціна: $${currentPrice.toFixed(2)}</span>`;
+                html += '</div>';
+            }
+
+            if (patterns.length > 0) {
+                html += '<div style="margin-top: 10px; border-top: 1px solid #2a2a4a; padding-top: 10px;"><strong>🕯 Виявлені патерни:</strong><ul style="margin: 8px 0 0 20px;">';
+                patterns.forEach(p => {
+                    html += `<li style="color: ${p.color}"><strong>${p.name}</strong> — ${p.description}</li>`;
+                });
+                html += '</ul><small style="color:#888;">ℹ️ Патерни показані лише для інформації</small></div>';
+            } else if (patterns.length === 0 && levels.resistance.length === 0 && levels.support.length === 0) {
+                html += '<div style="color: #888;">📊 Завантаження даних...</div>';
+            }
+
+            html += '</div>';
+            resultDiv.innerHTML = html;
+        }
+
+    } catch(e) {
+        console.error('Помилка завантаження графіка:', e);
+        const chartDiv = document.getElementById('techChartContainer');
+        if (chartDiv) chartDiv.innerHTML = '<div class="loading">❌ Помилка завантаження графіка: ' + e.message + '</div>';
+    }
+}
+
+        function calculateEMA(data, period) {
+    if (data.length < period) return Array(data.length).fill(null);
+    const result = Array(data.length).fill(null);
+    const k = 2 / (period + 1);
+    let ema = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    result[period - 1] = ema;
+    for (let i = period; i < data.length; i++) {
+        ema = data[i] * k + ema * (1 - k);
+        result[i] = ema;
+    }
+    return result;
+}
+
+        // Розпізнавання свічкових патернів (ТІЛЬКИ ДЛЯ ВІЗУАЛІЗАЦІЇ, НЕ ДЛЯ СИГНАЛІВ)
+function detectCandlePatterns(klines) {
+    if (!klines || klines.length < 5) return [];
+
+    const patterns = [];
+    const last = klines[klines.length - 1];
+    const prev = klines[klines.length - 2];
+    const prev2 = klines[klines.length - 3];
+
+    const open = last.open;
+    const high = last.high;
+    const low = last.low;
+    const close = last.close;
+    const body = Math.abs(close - open);
+    const totalRange = high - low;
+
+    if (totalRange === 0) return [];
+
+    const bodyPercent = body / totalRange;
+    const upperWickPercent = (high - Math.max(open, close)) / totalRange;
+    const lowerWickPercent = (Math.min(open, close) - low) / totalRange;
+
+    // ============= МОЛОТ (Hammer) - бичий патерн =============
+    // Довгий нижній хвіст (≥60% діапазону), маленьке тіло (≤30%), короткий верхній хвіст (≤20%)
+    if (lowerWickPercent > 0.6 && upperWickPercent < 0.2 && bodyPercent < 0.3) {
+        patterns.push({
+            type: 'hammer',
+            name: '🔨 МОЛОТ',
+            direction: 'bullish',
+            description: 'Можливий розворот вгору',
+            color: '#00ff88',
+            y: low * 0.98
+        });
+    }
+
+    // ============= ВИСЯЧА ЛЮДИНА (Hanging Man) - ведмежий патерн =============
+    // Довгий нижній хвіст, маленьке тіло, на вершині тренду
+    //if (lowerWickPercent > 0.6 && upperWickPercent < 0.2 && bodyPercent < 0.3 && close < open) {
+    //    patterns.push({
+    //        type: 'hanging_man',
+    //        name: '💀 ВИСЯЧА ЛЮДИНА',
+    //        direction: 'bearish',
+    //        description: 'Можливий розворот вниз',
+    //        color: '#ff4444',
+    //        y: high * 1.02
+    //    });
+    //}
+
+    // ============= БИЧЕ ПОГЛИНАННЯ (Bullish Engulfing) =============
+    if (prev && close > open && prev.close < prev.open &&
+        open < prev.close && close > prev.open) {
+        patterns.push({
+            type: 'bullish_engulfing',
+            name: '📈 БИЧЕ ПОГЛИНАННЯ',
+            direction: 'bullish',
+            description: 'Сильний сигнал до покупки',
+            color: '#00ff88',
+            y: low * 0.98
+        });
+    }
+
+    // ============= ВЕДМЕЖЕ ПОГЛИНАННЯ (Bearish Engulfing) =============
+    if (prev && close < open && prev.close > prev.open &&
+        open > prev.close && close < prev.open) {
+        patterns.push({
+            type: 'bearish_engulfing',
+            name: '📉 ВЕДМЕЖЕ ПОГЛИНАННЯ',
+            direction: 'bearish',
+            description: 'Сильний сигнал до продажу',
+            color: '#ff4444',
+            y: high * 1.02
+        });
+    }
+
+    // ============= ДОДЖІ (Doji) - нерішучість =============
+    if (body / totalRange < 0.1 && totalRange > 0) {
+        patterns.push({
+            type: 'doji',
+            name: '⚪ ДОДЖІ',
+            direction: 'neutral',
+            description: 'Ринок нерішучий, можливий розворот',
+            color: '#ffaa00',
+            y: (high + low) / 2
+        });
+    }
+
+    // ============= ПІН-БАР (Pin Bar) =============
+    // Довгий хвіст з одного боку, маленьке тіло з іншого
+    if ((lowerWickPercent > 0.6 && upperWickPercent < 0.2) ||
+        (upperWickPercent > 0.6 && lowerWickPercent < 0.2)) {
+        const isBullishPin = lowerWickPercent > 0.6;
+        patterns.push({
+            type: 'pin_bar',
+            name: isBullishPin ? '📌 ПІН-БАР (бичий)' : '📌 ПІН-БАР (ведмежий)',
+            direction: isBullishPin ? 'bullish' : 'bearish',
+            description: isBullishPin ? 'Відбій від підтримки' : 'Відбій від опору',
+            color: isBullishPin ? '#00ff88' : '#ff4444',
+            y: isBullishPin ? low * 0.98 : high * 1.02
+        });
+    }
+
+    return patterns;
+}
 
         async function loadTechAnalysisOrders() {
     const side = document.getElementById('taOrdersSideFilter')?.value || 'all';
@@ -3366,7 +3869,6 @@ async function updateScalpPnL() {
     const limit = document.getElementById('taOrdersLimit')?.value || 20;
 
     try {
-        // Використовуємо правильний параметр strategy
         const response = await fetch(`/api/orders?side=${side}&status=${status}&limit=${limit}&strategy=tech_analysis`);
         const orders = await response.json();
 
@@ -3378,21 +3880,26 @@ async function updateScalpPnL() {
             return;
         }
 
-        let html = `<div class="orders-table">
-            <table style="width: 100%; border-collapse: collapse;">
-                <thead>
-                    <tr style="background: #0f0f1a; border-bottom: 2px solid #2a2a4a;">
-                        <th style="padding: 12px;">Час</th>
-                        <th style="padding: 12px;">Пара</th>
-                        <th style="padding: 12px;">Сторона</th>
-                        <th style="padding: 12px;">Ціна</th>
-                        <th style="padding: 12px;">Кількість</th>
-                        <th style="padding: 12px;">Статус</th>
-                        <th style="padding: 12px;">PnL</th>
-                        <th style="padding: 12px;">Сигнал</th>
-                    </tr>
-                </thead>
-                <tbody>`;
+        // ОЧИЩУЄМО ТАБЛИЦЮ ПЕРЕД ЗАПОВНЕННЯМ
+        table.innerHTML = '';
+
+        let html = `
+            <div class="orders-table">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: #0f0f1a; border-bottom: 2px solid #2a2a4a;">
+                            <th style="padding: 12px; text-align: left;">Час</th>
+                            <th style="padding: 12px; text-align: left;">Пара</th>
+                            <th style="padding: 12px; text-align: left;">Сторона</th>
+                            <th style="padding: 12px; text-align: left;">Ціна</th>
+                            <th style="padding: 12px; text-align: left;">Кількість</th>
+                            <th style="padding: 12px; text-align: left;">Статус</th>
+                            <th style="padding: 12px; text-align: left;">PnL</th>
+                            <th style="padding: 12px; text-align: left;">Сигнал</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
 
         for (const o of orders) {
             const pnlValue = parseFloat(o.pnl || 0);
@@ -3401,20 +3908,28 @@ async function updateScalpPnL() {
             const sideText = o.side === 'buy' ? '📈 LONG' : '📉 SHORT';
             const statusText = o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито';
 
-            html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${pnlValue}, '${o.opened_at}')" style="cursor: pointer; border-bottom: 1px solid #2a2a4a;">
-                <td style="padding: 12px;">${openedAt}</td>
-                <td style="padding: 12px;"><strong>${o.symbol}</strong></td>
-                <td style="padding: 12px;" class="${sideClass}">${sideText}</td>
-                <td style="padding: 12px;">$${parseFloat(o.price).toFixed(2)}</td>
-                <td style="padding: 12px;">${parseFloat(o.quantity).toFixed(6)}</td>
-                <td style="padding: 12px;">${statusText}</td>
-                <td style="padding: 12px;" class="${pnlValue >= 0 ? 'buy' : 'sell'}">${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)}</td>
-                <td style="padding: 12px;">${o.signal_type || '-'}</td>
-            </table>`;
+            html += `
+                <tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${pnlValue}, '${o.opened_at}')" style="cursor: pointer; border-bottom: 1px solid #2a2a4a;">
+                    <td style="padding: 12px;">${openedAt}</td>
+                    <td style="padding: 12px;"><strong>${o.symbol}</strong></td>
+                    <td style="padding: 12px;" class="${sideClass}">${sideText}</td>
+                    <td style="padding: 12px;">$${parseFloat(o.price).toFixed(2)}</td>
+                    <td style="padding: 12px;">${parseFloat(o.quantity).toFixed(6)}</td>
+                    <td style="padding: 12px;">${statusText}</td>
+                    <td style="padding: 12px;" class="${pnlValue >= 0 ? 'buy' : 'sell'}">${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)}</td>
+                    <td style="padding: 12px;">${o.signal_type || '-'}</td>
+                </tr>
+            `;
         }
 
-        html += `</tbody></table></div>`;
+        html += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+
         table.innerHTML = html;
+
     } catch(e) {
         console.error('Помилка завантаження угод тех. аналізу:', e);
         document.getElementById('taOrdersTable').innerHTML = '<div class="loading">❌ Помилка завантаження: ' + e.message + '</div>';
@@ -3521,6 +4036,122 @@ async function updateScalpPnL() {
     }
 };
 
+        // Розпізнавання свічкових патернів з урахуванням вертикального зміщення
+function detectCandlePatternsWithIndex(klines) {
+    if (!klines || klines.length < 5) return [];
+
+    const patterns = [];
+
+    for (let i = 2; i < klines.length; i++) {
+        const candle = klines[i];
+        const prev = klines[i - 1];
+
+        const open = candle.open;
+        const high = candle.high;
+        const low = candle.low;
+        const close = candle.close;
+        const body = Math.abs(close - open);
+        const totalRange = high - low;
+
+        if (totalRange === 0) continue;
+
+        const bodyPercent = body / totalRange;
+        const upperWickPercent = (high - Math.max(open, close)) / totalRange;
+        const lowerWickPercent = (Math.min(open, close) - low) / totalRange;
+
+        let pattern = null;
+        let ay = 0;
+        let y = 0;
+
+        // Визначаємо тип патерну
+        if (upperWickPercent > 0.6 && lowerWickPercent < 0.2 && bodyPercent < 0.3) {
+            pattern = {
+                name: '📌 ПІН-БАР (ведмежий)',
+                description: 'Відбій від опору',
+                color: '#ff4444'
+            };
+            y = high * 1.02;
+            ay = 50;
+        }
+        else if (lowerWickPercent > 0.6 && upperWickPercent < 0.2 && bodyPercent < 0.3 && close > open) {
+            pattern = {
+                name: '🔨 МОЛОТ',
+                description: 'Розворот вгору',
+                color: '#00ff88'
+            };
+            y = low * 0.98;
+            ay = -50;
+        }
+        //else if (lowerWickPercent > 0.6 && upperWickPercent < 0.2 && bodyPercent < 0.3 && close < open) {
+        //   pattern = {
+        //        name: '💀 ВИСЯЧА ЛЮДИНА',
+        //        description: 'Розворот вниз',
+        //        color: '#ff4444'
+        //   };
+        //    y = high * 1.02;
+        //    ay = 50;
+        //}
+        else if (prev && close > open && prev.close < prev.open &&
+                 open < prev.close && close > prev.open) {
+            pattern = {
+                name: '📈 БИЧЕ ПОГЛИНАННЯ',
+                description: 'Сильний сигнал до покупки',
+                color: '#00ff88'
+            };
+            y = low * 0.97;
+            ay = -60;
+        }
+        else if (prev && close < open && prev.close > prev.open &&
+                 open > prev.close && close < prev.open) {
+            pattern = {
+                name: '📉 ВЕДМЕЖЕ ПОГЛИНАННЯ',
+                description: 'Сильний сигнал до продажу',
+                color: '#ff4444'
+            };
+            y = high * 1.03;
+            ay = 60;
+        }
+        else if (body / totalRange < 0.1 && totalRange > 0) {
+            pattern = {
+                name: '⚪ ДОДЖІ',
+                description: 'Нерішучість',
+                color: '#ffaa00'
+            };
+            y = (high + low) / 2;
+            ay = 0;
+        }
+
+        if (pattern) {
+            patterns.push({
+                index: i,
+                ...pattern,
+                y: y,
+                ay: ay,
+                // Додаємо зміщення для запобігання накладання
+                offset: 0
+            });
+        }
+    }
+
+    // Запобігаємо накладанню анотацій на сусідніх свічках
+    for (let i = 0; i < patterns.length; i++) {
+        let offsetCount = 0;
+        for (let j = 0; j < patterns.length; j++) {
+            if (i !== j && Math.abs(patterns[i].index - patterns[j].index) <= 2) {
+                if (patterns[j].name === patterns[i].name) {
+                    offsetCount++;
+                }
+            }
+        }
+        // Якщо є сусідні патерни, зміщуємо вертикально
+        if (offsetCount > 0) {
+            patterns[i].ay = patterns[i].ay + (offsetCount * 15);
+        }
+    }
+
+    return patterns;
+}
+
 window.quickResetTechAnalysis = async function() {
     if (!confirm('⚠️ Скинути стратегію технічного аналізу?')) return;
     try {
@@ -3544,6 +4175,7 @@ async function loadTechAnalysisQuickStatus() {
     try {
         const response = await fetch('/api/tech_analysis/status');
         const data = await response.json();
+
         if (data.error) {
             console.warn('Tech analysis не знайдено:', data.error);
             return;
@@ -3551,6 +4183,9 @@ async function loadTechAnalysisQuickStatus() {
 
         const statusSpan = document.getElementById('taQuickStatus');
         const toggleBtn = document.getElementById('taQuickToggleBtn');
+        const balanceEl = document.getElementById('taQuickBalance');
+        const pnlEl = document.getElementById('taQuickPnl');
+        const tradesEl = document.getElementById('taQuickTrades');
 
         if (data.enabled) {
             if (statusSpan) {
@@ -3572,22 +4207,13 @@ async function loadTechAnalysisQuickStatus() {
             }
         }
 
-        // Оновлюємо метрики
-        const accuracyEl = document.getElementById('taQuickAccuracy');
-        if (accuracyEl) accuracyEl.innerHTML = `${data.forecast_accuracy || 0}%`;
-
-        const activeEl = document.getElementById('taQuickActive');
-        if (activeEl) activeEl.innerHTML = data.active_forecasts || 0;
-
-        const pnlEl = document.getElementById('taQuickPnl');
+        if (balanceEl) balanceEl.innerHTML = `$${(data.balance || 0).toFixed(2)}`;
         if (pnlEl) {
             const pnl = data.total_pnl || 0;
             pnlEl.innerHTML = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
             pnlEl.style.color = pnl >= 0 ? '#00ff88' : '#ff4444';
         }
-
-        const winRateEl = document.getElementById('taQuickWinRate');
-        if (winRateEl) winRateEl.innerHTML = `${(data.win_rate || 0).toFixed(1)}%`;
+        if (tradesEl) tradesEl.innerHTML = data.total_trades || 0;
 
     } catch(e) {
         console.error('Помилка завантаження статусу тех. аналізу:', e);

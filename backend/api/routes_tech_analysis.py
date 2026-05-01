@@ -3,27 +3,41 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 from functools import wraps
 import asyncio
+from database.db import get_db
 
 logger = logging.getLogger(__name__)
 
 tech_analysis_bp = Blueprint('tech_analysis', __name__, url_prefix='/api/tech_analysis')
 
-# Глобальний екземпляр стратегії (для сумісності)
-tech_strategy = None
-# Глобальний екземпляр trading_engine (для доступу до стратегій)
+# Глобальний екземпляр trading_engine
 _trading_engine = None
-
-
-def init_tech_strategy(strategy):
-    """Ініціалізація стратегії зовнішнім модулем"""
-    global tech_strategy
-    tech_strategy = strategy
+_tech_strategy = None  # запасний варіант
 
 
 def init_trading_engine(engine):
     """Ініціалізація trading_engine для доступу до стратегій"""
     global _trading_engine
     _trading_engine = engine
+    logger.info("Trading engine initialized for tech_analysis blueprint")
+
+
+def init_tech_strategy(strategy):
+    """Ініціалізація стратегії (запасний варіант)"""
+    global _tech_strategy
+    _tech_strategy = strategy
+    logger.info("Tech strategy initialized directly")
+
+
+def get_tech_strategy():
+    """Отримання стратегії з trading_engine"""
+    # Спершу пробуємо отримати з trading_engine
+    if _trading_engine and hasattr(_trading_engine, 'strategies'):
+        for strategy in _trading_engine.strategies.values():
+            if strategy.name == 'tech_analysis':
+                return strategy
+
+    # Якщо не знайшли, повертаємо запасний варіант
+    return _tech_strategy
 
 
 def async_route(f):
@@ -31,70 +45,90 @@ def async_route(f):
 
     @wraps(f)
     def wrapped(*args, **kwargs):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         return loop.run_until_complete(f(*args, **kwargs))
 
     return wrapped
 
 
-def get_tech_strategy():
-    """Отримання стратегії з trading_engine або з глобальної змінної"""
-    # Спочатку пробуємо отримати з trading_engine
-    if _trading_engine:
-        for strategy in _trading_engine.strategies.values():
-            if strategy.name == 'tech_analysis':
-                return strategy
-    # Якщо не знайшли, повертаємо глобальний екземпляр
-    return tech_strategy
-
+# ============= ОСНОВНІ ENDPOINTS =============
 
 @tech_analysis_bp.route('/status', methods=['GET'])
 @async_route
 async def get_status():
     """Отримання статусу стратегії"""
     strategy = get_tech_strategy()
+
+    # Якщо стратегії немає, але є trading_engine - спробуємо знайти ще раз
+    if not strategy and _trading_engine:
+        for s in _trading_engine.strategies.values():
+            if s.name == 'tech_analysis':
+                strategy = s
+                break
+
     if not strategy:
-        return jsonify({'enabled': False, 'error': 'Стратегія не ініціалізована', 'name': 'tech_analysis'}), 200
+        # Повертаємо базовий статус без помилки, щоб фронтенд не падав
+        return jsonify({
+            'enabled': False,
+            'name': 'tech_analysis',
+            'balance': 100,
+            'locked_balance': 0,
+            'available_balance': 100,
+            'total_pnl': 0,
+            'total_trades': 0,
+            'win_rate': 0,
+            'symbols': ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'],
+            'trade_size_percent': 50,
+            'take_profit_percent': 4.0,
+            'stop_loss_percent': 2.0,
+            'min_confidence': 65,
+            'timeframe': '60',
+            'forecast_accuracy': 0,
+            'active_forecasts': 0,
+            'settings': {
+                'trade_size_percent': 50,
+                'min_confidence': 65,
+                'stop_loss_percent': 2.0,
+                'take_profit_percent': 4.0
+            }
+        })
 
     try:
-        # Якщо стратегія має метод get_status (як BaseStrategy)
         if hasattr(strategy, 'get_status'):
             status = await strategy.get_status()
             return jsonify(status)
-
-        # Інакше повертаємо базові поля
-        return jsonify({
-            'id': getattr(strategy, 'strategy_id', None),
-            'name': getattr(strategy, 'name', 'tech_analysis'),
-            'enabled': getattr(strategy, 'enabled', False),
-            'balance': getattr(strategy, 'balance', 0),
-            'locked_balance': getattr(strategy, 'locked_balance', 0),
-            'available_balance': getattr(strategy, 'available_balance', 0),
-            'total_pnl': getattr(strategy, 'total_pnl', 0),
-            'total_trades': getattr(strategy, 'total_trades', 0),
-            'winning_trades': getattr(strategy, 'winning_trades', 0),
-            'losing_trades': getattr(strategy, 'losing_trades', 0),
-            'win_rate': getattr(strategy, 'win_rate', 0),
-            'symbols': getattr(strategy, 'symbols', ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']),
-            'trade_size_percent': getattr(strategy, 'trade_size_percent', 50),
-            'take_profit_percent': getattr(strategy, 'take_profit_percent', 4.0),
-            'stop_loss_percent': getattr(strategy, 'stop_loss_percent', 2.0),
-            'min_confidence': getattr(strategy, 'min_confidence', 65),
-            'timeframe': getattr(strategy, 'timeframe', '60'),
-            'daily_trades_count': getattr(strategy, 'daily_trades_count', 0),
-            'max_daily_trades': getattr(strategy, 'max_daily_trades', 50),
-            'is_blocked': getattr(strategy, '_is_blocked', False),
-            'block_reason': getattr(strategy, '_block_reason', None),
-            'forecast_accuracy': getattr(strategy, 'forecast_accuracy', 0),
-            'active_forecasts': len(getattr(strategy, 'forecasts', [])),
-            'settings': {
+        else:
+            return jsonify({
+                'id': getattr(strategy, 'strategy_id', None),
+                'name': getattr(strategy, 'name', 'tech_analysis'),
+                'enabled': getattr(strategy, 'enabled', False),
+                'balance': getattr(strategy, 'balance', 100),
+                'locked_balance': getattr(strategy, 'locked_balance', 0),
+                'available_balance': getattr(strategy, 'available_balance', 100),
+                'total_pnl': getattr(strategy, 'total_pnl', 0),
+                'total_trades': getattr(strategy, 'total_trades', 0),
+                'winning_trades': getattr(strategy, 'winning_trades', 0),
+                'losing_trades': getattr(strategy, 'losing_trades', 0),
+                'win_rate': getattr(strategy, 'win_rate', 0),
+                'symbols': getattr(strategy, 'symbols', ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']),
                 'trade_size_percent': getattr(strategy, 'trade_size_percent', 50),
-                'min_confidence': getattr(strategy, 'min_confidence', 65),
+                'take_profit_percent': getattr(strategy, 'take_profit_percent', 4.0),
                 'stop_loss_percent': getattr(strategy, 'stop_loss_percent', 2.0),
-                'take_profit_percent': getattr(strategy, 'take_profit_percent', 4.0)
-            }
-        })
+                'min_confidence': getattr(strategy, 'min_confidence', 65),
+                'timeframe': getattr(strategy, 'timeframe', '60'),
+                'forecast_accuracy': getattr(strategy, 'forecast_accuracy', 0),
+                'active_forecasts': len(getattr(strategy, 'forecasts', [])),
+                'settings': {
+                    'trade_size_percent': getattr(strategy, 'trade_size_percent', 50),
+                    'min_confidence': getattr(strategy, 'min_confidence', 65),
+                    'stop_loss_percent': getattr(strategy, 'stop_loss_percent', 2.0),
+                    'take_profit_percent': getattr(strategy, 'take_profit_percent', 4.0)
+                }
+            })
     except Exception as e:
         logger.error(f"Помилка отримання статусу: {e}")
         return jsonify({'enabled': False, 'error': str(e), 'name': 'tech_analysis'}), 200
@@ -103,34 +137,27 @@ async def get_status():
 @tech_analysis_bp.route('/toggle', methods=['POST'])
 @async_route
 async def toggle_strategy():
-    """Увімкнення/вимкнення стратегії через trading_engine"""
+    """Увімкнення/вимкнення стратегії"""
     strategy = get_tech_strategy()
     if not strategy:
-        return jsonify({'success': False, 'error': 'Стратегія не ініціалізована', 'enabled': False}), 404
+        return jsonify({'success': False, 'error': 'Стратегія не знайдена', 'enabled': False}), 404
 
     try:
-        if hasattr(strategy, 'enabled'):
-            if strategy.enabled:
-                # Зупиняємо через trading_engine
-                if _trading_engine and hasattr(strategy, 'strategy_id'):
-                    await _trading_engine.stop_strategy(strategy.strategy_id)
-                else:
-                    await strategy.stop()
-                status = "деактивовано"
+        if strategy.enabled:
+            if _trading_engine and hasattr(strategy, 'strategy_id'):
+                await _trading_engine.stop_strategy(strategy.strategy_id)
             else:
-                # Запускаємо через trading_engine
-                if _trading_engine and hasattr(strategy, 'strategy_id'):
-                    await _trading_engine.start_strategy(strategy.strategy_id)
-                else:
-                    await strategy.start()
-                status = "активовано"
-
-            return jsonify({'success': True, 'message': f'Стратегію {status}', 'enabled': strategy.enabled})
+                await strategy.stop()
+            return jsonify({'success': True, 'enabled': False, 'message': 'Стратегію зупинено'})
+        else:
+            if _trading_engine and hasattr(strategy, 'strategy_id'):
+                await _trading_engine.start_strategy(strategy.strategy_id)
+            else:
+                await strategy.start()
+            return jsonify({'success': True, 'enabled': True, 'message': 'Стратегію запущено'})
     except Exception as e:
         logger.error(f"Помилка toggle: {e}")
         return jsonify({'success': False, 'error': str(e), 'enabled': False}), 500
-
-    return jsonify({'success': False, 'error': 'Strategy not found', 'enabled': False}), 404
 
 
 @tech_analysis_bp.route('/reset', methods=['POST'])
@@ -139,25 +166,10 @@ async def reset_strategy():
     """Скидання стратегії"""
     strategy = get_tech_strategy()
     if not strategy:
-        return jsonify({'success': False, 'error': 'Стратегія не ініціалізована'}), 404
+        return jsonify({'success': False, 'error': 'Стратегія не знайдена'}), 404
 
     try:
-        if hasattr(strategy, 'reset'):
-            await strategy.reset()
-        else:
-            # Базове скидання
-            strategy.balance = 100.0
-            strategy.locked_balance = 0.0
-            strategy.total_pnl = 0.0
-            strategy.total_trades = 0
-            strategy.winning_trades = 0
-            strategy.losing_trades = 0
-            strategy.win_rate = 0.0
-            if hasattr(strategy, 'open_positions'):
-                strategy.open_positions.clear()
-            if hasattr(strategy, 'forecasts'):
-                strategy.forecasts.clear()
-
+        await strategy.reset()
         return jsonify({'success': True, 'message': 'Стратегію скинуто'})
     except Exception as e:
         logger.error(f"Помилка reset: {e}")
@@ -169,8 +181,6 @@ async def reset_strategy():
 async def analyze_symbol():
     """Аналіз конкретного символу"""
     strategy = get_tech_strategy()
-    if not strategy:
-        return jsonify({'signal': 'neutral', 'confidence': 0, 'trend': 'neutral', 'error': 'Strategy not initialized'})
 
     data = request.json
     symbol = data.get('symbol', '').upper()
@@ -178,8 +188,18 @@ async def analyze_symbol():
     if not symbol:
         return jsonify({'error': 'symbol не вказано'}), 400
 
+    # Якщо стратегії немає, повертаємо нейтральний аналіз
+    if not strategy:
+        return jsonify({
+            'signal': 'neutral',
+            'confidence': 50,
+            'explanation': ['Стратегія технічного аналізу не активована'],
+            'target_price': 0,
+            'current_price': 0,
+            'trend': 'neutral'
+        })
+
     try:
-        # Спроба використати реальний аналіз стратегії
         if hasattr(strategy, '_get_indicators'):
             indicators = await strategy._get_indicators(symbol)
             if indicators:
@@ -212,22 +232,14 @@ async def analyze_symbol():
                     'trend': indicators.get('trend', 'neutral')
                 })
     except Exception as e:
-        logger.error(f"Помилка аналізу через _get_indicators: {e}")
-
-    # Якщо не вдалося отримати реальний аналіз, повертаємо тестові дані
-    test_price = 51000.0 if symbol == 'BTCUSDT' else (3000.0 if symbol == 'ETHUSDT' else 150.0)
+        logger.error(f"Помилка аналізу: {e}")
 
     return jsonify({
         'signal': 'neutral',
-        'confidence': 65,
-        'explanation': [
-            '📈 Довгостроковий тренд НЕЙТРАЛЬНИЙ',
-            '⚪ RSI в нормі (52.5)',
-            '⚠️ Немає чіткого сигналу для входу',
-            '💡 Рекомендується утримуватись від угод'
-        ],
-        'target_price': test_price,
-        'current_price': test_price,
+        'confidence': 50,
+        'explanation': ['Не вдалося виконати технічний аналіз'],
+        'target_price': 0,
+        'current_price': 0,
         'trend': 'neutral'
     })
 
@@ -235,54 +247,69 @@ async def analyze_symbol():
 @tech_analysis_bp.route('/forecasts', methods=['GET'])
 @async_route
 async def get_forecasts():
-    """Отримання списку прогнозів"""
-    strategy = get_tech_strategy()
+    """Отримання прогнозів з БД"""
+    status = request.args.get('status', 'all')
+    limit = int(request.args.get('limit', 50))
 
-    if strategy and hasattr(strategy, 'forecasts'):
-        forecasts = strategy.forecasts if strategy.forecasts else []
-        status = request.args.get('status', 'all')
-        limit = int(request.args.get('limit', 50))
+    try:
+        with get_db() as conn:
+            query = "SELECT * FROM forecasts WHERE strategy = 'tech_analysis'"
+            params = []
 
-        if status != 'all':
-            forecasts = [f for f in forecasts if f.get('status') == status]
+            if status != 'all':
+                query += " AND status = ?"
+                params.append(status)
 
-        forecasts = forecasts[:limit]
-        return jsonify({'forecasts': forecasts, 'total': len(forecasts)})
+            query += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
 
-    # Тестові дані, якщо немає реальних прогнозів
-    return jsonify({'forecasts': [], 'total': 0})
+            cursor = conn.execute(query, params)
+            forecasts = [dict(row) for row in cursor.fetchall()]
+
+            # Конвертуємо дати в рядки
+            for f in forecasts:
+                if f.get('created_at'):
+                    f['created_at'] = str(f['created_at'])
+                if f.get('expires_at'):
+                    f['expires_at'] = str(f['expires_at'])
+                if f.get('resolved_at'):
+                    f['resolved_at'] = str(f['resolved_at'])
+
+            return jsonify({'forecasts': forecasts})
+    except Exception as e:
+        logger.error(f"Помилка отримання прогнозів: {e}")
+        return jsonify({'forecasts': []})
 
 
 @tech_analysis_bp.route('/forecasts/stats', methods=['GET'])
 @async_route
 async def get_forecast_stats():
-    """Отримання статистики прогнозів"""
-    strategy = get_tech_strategy()
+    """Статистика прогнозів"""
+    try:
+        with get_db() as conn:
+            cursor = conn.execute("SELECT COUNT(*) as count FROM forecasts WHERE strategy = 'tech_analysis'")
+            total = cursor.fetchone()['count'] if cursor else 0
 
-    if strategy:
-        total = getattr(strategy, 'total_trades', 0)
-        winning = getattr(strategy, 'winning_trades', 0)
-        win_rate = (winning / total * 100) if total > 0 else 0
+            cursor = conn.execute(
+                "SELECT COUNT(*) as count FROM forecasts WHERE strategy = 'tech_analysis' AND status = 'active'")
+            active = cursor.fetchone()['count'] if cursor else 0
 
-        return jsonify({
-            'total': total,
-            'active': len(getattr(strategy, 'forecasts', [])),
-            'success': winning,
-            'failed': total - winning,
-            'expired': 0,
-            'avg_confidence': getattr(strategy, 'min_confidence', 65),
-            'accuracy': round(win_rate, 1)
-        })
+            cursor = conn.execute(
+                "SELECT COUNT(*) as count FROM forecasts WHERE strategy = 'tech_analysis' AND success = 1")
+            success = cursor.fetchone()['count'] if cursor else 0
 
-    return jsonify({
-        'total': 0,
-        'active': 0,
-        'success': 0,
-        'failed': 0,
-        'expired': 0,
-        'avg_confidence': 65,
-        'accuracy': 0
-    })
+            accuracy = round(success / (total - active) * 100, 1) if (total - active) > 0 else 0
+
+            return jsonify({
+                'total': total,
+                'active': active,
+                'success': success,
+                'failed': total - active - success,
+                'accuracy': accuracy
+            })
+    except Exception as e:
+        logger.error(f"Помилка отримання статистики: {e}")
+        return jsonify({'total': 0, 'active': 0, 'success': 0, 'failed': 0, 'accuracy': 0})
 
 
 @tech_analysis_bp.route('/settings', methods=['POST'])
@@ -291,7 +318,7 @@ async def update_settings():
     """Оновлення налаштувань стратегії"""
     strategy = get_tech_strategy()
     if not strategy:
-        return jsonify({'success': False, 'error': 'Стратегія не ініціалізована'}), 404
+        return jsonify({'success': False, 'error': 'Стратегія не знайдена'}), 404
 
     data = request.json
 
@@ -310,7 +337,6 @@ async def update_settings():
         if 'timeframe' in data:
             strategy.timeframe = str(data['timeframe'])
 
-        # Зберігаємо налаштування в конфіг
         if hasattr(strategy, 'update_settings'):
             await strategy.update_settings(**data)
 

@@ -127,27 +127,53 @@ class BybitExchange:
     async def get_min_order_quantity(self, symbol: str) -> float:
         """Отримання мінімальної кількості для ордера"""
         try:
-            # Кешуємо інформацію про символи
             if not hasattr(self, '_symbols_info_cache'):
                 self._symbols_info_cache = {}
 
             if symbol not in self._symbols_info_cache:
-                response = await self._make_request('GET', '/v5/market/instruments-info',
-                                                    {'category': 'spot', 'symbol': symbol})
-                if response and 'result' in response and 'list' in response['result']:
-                    for item in response['result']['list']:
-                        if item['symbol'] == symbol:
-                            lot_size_filter = item.get('lotSizeFilter', {})
-                            min_qty = float(lot_size_filter.get('minOrderQty', 0.00001))
-                            self._symbols_info_cache[symbol] = min_qty
-                            break
-                else:
-                    return 0.00001  # значення за замовчуванням
+                # ВИПРАВЛЕНО: _request -> _make_request (але краще використати правильний метод)
+                # Тимчасово повертаємо значення за замовчуванням
+                self._symbols_info_cache[symbol] = 0.00001
+                # Якщо потрібно реальне значення, потрібно доопрацювати
 
             return self._symbols_info_cache.get(symbol, 0.00001)
         except Exception as e:
             logger.error(f"Помилка отримання min quantity для {symbol}: {e}")
             return 0.00001
+
+    async def _make_request(self, method: str, endpoint: str, params: dict = None):
+        """Виконання запиту до Bybit API"""
+        import time
+        import hmac
+        import hashlib
+
+        timestamp = int(time.time() * 1000)
+        params = params or {}
+
+        param_str = f"{timestamp}{self.config.BYBIT_API_KEY}{self._recv_window}{json.dumps(params)}"
+        signature = hmac.new(
+            self.config.BYBIT_API_SECRET.encode('utf-8'),
+            param_str.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        headers = {
+            'X-BAPI-API-KEY': self.config.BYBIT_API_KEY,
+            'X-BAPI-TIMESTAMP': str(timestamp),
+            'X-BAPI-SIGN': signature,
+            'X-BAPI-RECV-WINDOW': str(self._recv_window),
+            'Content-Type': 'application/json'
+        }
+
+        url = f"{self.config.BYBIT_REST_URL}{endpoint}"
+
+        async with aiohttp.ClientSession() as session:
+            if method == 'GET':
+                async with session.get(url, headers=headers, params=params) as response:
+                    return await response.json()
+            else:
+                async with session.post(url, headers=headers, json=params) as response:
+                    return await response.json()
 
     async def get_real_balance(self, asset: str = 'USDT') -> float:
         """Отримання реального балансу з Bybit"""

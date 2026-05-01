@@ -174,12 +174,15 @@ def create_flask_app(config, trading_engine):
 
                 order_dict = dict(order)
                 strategy_name = order_dict.get('strategy_name', 'unknown')
+                is_tech_analysis = strategy_name == 'tech_analysis'
 
                 col_info = conn.execute("PRAGMA table_info(orders)").fetchall()
                 has_closed_price = any(c[1] == 'closed_price' for c in col_info)
 
                 tf_param = request.args.get('tf', '1')
-                if saved_klines and len(saved_klines) > 0 and tf_param == '1':
+
+                # Якщо є збережені свічки - використовуємо їх
+                if saved_klines and len(saved_klines) > 0:
                     entry_point = {
                         'price': float(order_dict['price']),
                         'timestamp': order_dict['opened_at'],
@@ -287,12 +290,12 @@ def create_flask_app(config, trading_engine):
                 symbol = order_dict['symbol']
                 from datetime import datetime, timezone
 
-                tf = request.args.get('tf', '1')
+                tf = request.args.get('tf', '15')
                 valid_tfs = {'1', '3', '5', '15', '30', '60', '120', '240', 'D'}
                 if tf not in valid_tfs:
-                    tf = '1'
+                    tf = '15'
                 tf_minutes = {'1': 1, '3': 3, '5': 5, '15': 15, '30': 30,
-                              '60': 60, '120': 120, '240': 240, 'D': 1440}.get(tf, 1)
+                              '60': 60, '120': 120, '240': 240, 'D': 1440}.get(tf, 15)
 
                 def parse_dt(ts_str):
                     if not ts_str:
@@ -311,32 +314,42 @@ def create_flask_app(config, trading_engine):
 
                 exit_dt = parse_dt(exit_point['timestamp']) if exit_point else None
 
-                BEFORE_SECS = 30 * tf_minutes * 60
-                AFTER_SECS = 30 * tf_minutes * 60
-
-                start_ts_ms = int((entry_dt.timestamp() - BEFORE_SECS) * 1000)
-                if exit_dt:
-                    end_ts_ms = int((exit_dt.timestamp() + AFTER_SECS) * 1000)
-                else:
-                    end_ts_ms = int((entry_dt.timestamp() + 2 * tf_minutes * 3600 / 60) * 1000)
-
-                duration_candles = (end_ts_ms - start_ts_ms) // (tf_minutes * 60000)
-                needed = min(max(duration_candles + 20, 100), 1000)
-
-                klines_raw = await trading_engine.exchange.get_klines(symbol, tf, limit=needed)
+                # Отримуємо свічки (більше для тех. аналізу)
+                klines_raw = await trading_engine.exchange.get_klines(symbol, tf, limit=500)
+                if not klines_raw:
+                    klines_raw = []
                 klines_raw.sort(key=lambda k: k['timestamp'])
 
-                filtered_klines = [
-                    k for k in klines_raw
-                    if start_ts_ms <= k['timestamp'] <= end_ts_ms
-                ]
-
-                if len(filtered_klines) < 5:
-                    filtered_klines = klines_raw
-                    out_of_range = True
+                # ============= ОСНОВНЕ ВИПРАВЛЕННЯ =============
+                # Для тех. аналізу та відкритих угод показуємо останні 300 свічок
+                if is_tech_analysis and order_dict['status'] == 'open':
+                    # Відкрита угода тех. аналізу - беремо останні 300 свічок
+                    filtered_klines = klines_raw[-300:] if len(klines_raw) > 300 else klines_raw
+                    out_of_range = len(klines_raw) < 100
                 else:
-                    out_of_range = False
+                    # Для інших стратегій або закритих угод - фільтруємо за часом
+                    BEFORE_SECS = 60 * tf_minutes * 60
+                    AFTER_SECS = 60 * tf_minutes * 60
 
+                    start_ts_ms = int((entry_dt.timestamp() - BEFORE_SECS) * 1000)
+                    if exit_dt:
+                        end_ts_ms = int((exit_dt.timestamp() + AFTER_SECS) * 1000)
+                    else:
+                        current_time = datetime.now(timezone.utc)
+                        end_ts_ms = int(current_time.timestamp() * 1000)
+
+                    filtered_klines = [
+                        k for k in klines_raw
+                        if start_ts_ms <= k['timestamp'] <= end_ts_ms
+                    ]
+
+                    if len(filtered_klines) < 5:
+                        filtered_klines = klines_raw[-200:]
+                        out_of_range = True
+                    else:
+                        out_of_range = False
+
+                # Додаємо time_iso для кожної свічки
                 klines_out = []
                 for k in filtered_klines:
                     k_copy = dict(k)
@@ -1674,10 +1687,6 @@ def create_flask_app(config, trading_engine):
 
         return jsonify(results)
 
-    # ============= ТЕХНІЧНИЙ АНАЛІЗ API (BLUEPRINT) =============
-    # Реєструємо blueprint для технічного аналізу
-    app.register_blueprint(tech_analysis_bp)
-
     # ============= PROMETHEUS METRICS API =============
 
     @app.route('/metrics')
@@ -1770,5 +1779,8 @@ def create_flask_app(config, trading_engine):
 
     # ВЕБ-ХУКИ
     register_webhook_routes(app, trading_engine)
+    # ============= ТЕХНІЧНИЙ АНАЛІЗ API (BLUEPRINT) =============
+    # Реєструємо blueprint для технічного аналізу
+    app.register_blueprint(tech_analysis_bp)
 
     return app

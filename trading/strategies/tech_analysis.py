@@ -25,10 +25,6 @@ class TechAnalysisStrategy(BaseStrategy):
         self.enabled = saved.get('enabled', False)
         self.timeframe = saved.get('timeframe', '60')  # 1 година
 
-        self.max_total_position_value = self.balance * 0.5  # Максимум 50% балансу в позиціях
-        self.min_trade_amount = 10
-        self.max_concurrent_positions = 2  # Максимум 2 позиції
-
         # Параметри торгівлі
         self.trade_size_percent = saved.get('trade_size_percent', 50)
         self.take_profit_percent = saved.get('take_profit_percent', 4.0)
@@ -36,11 +32,11 @@ class TechAnalysisStrategy(BaseStrategy):
         self.min_confidence = saved.get('min_confidence', 65.0)
 
         # ОБМЕЖЕННЯ
-        self.max_concurrent_positions = 2  # Максимум 2 позиції ВСЬОГО (не на символ)
+        self.max_concurrent_positions = 2
         self.min_trade_amount = 10
-        self.cooldown_minutes = 15  # Чекати 15 хвилин після закриття позиції перед новою
+        self.cooldown_minutes = 15
 
-        # Стан
+        # Стан (ініціалізуємо ДО використання)
         self.balance = 100.0
         self.locked_balance = 0.0
         self.total_pnl = 0.0
@@ -48,20 +44,20 @@ class TechAnalysisStrategy(BaseStrategy):
         self.winning_trades = 0
         self.losing_trades = 0
 
+        # Тепер можна використовувати self.balance
+        self.max_total_position_value = self.balance * 0.5  # ← тепер працює
+
         # Поточні позиції
         self.open_positions: Dict[str, dict] = {}
         self.current_prices: Dict[str, float] = {}
-
-        # КОЛДУН ДЛЯ СИМВОЛІВ (щоб не відкривати часто)
         self.last_trade_time: Dict[str, datetime] = {}
         self.last_signal_time: Dict[str, datetime] = {}
 
         self._analysis_task = None
         self._load_history()
 
-        logger.info(f"TechAnalysisStrategy ініціаліковано для пар: {self.symbols}")
-        logger.info(f"Обмеження: макс. позицій={self.max_concurrent_positions}, мін. сума=${self.min_trade_amount}, колдаун={self.cooldown_minutes}хв")
-
+        logger.info(f"TechAnalysisStrategy ініціалізовано для пар: {self.symbols}")
+        logger.info(f"Обмеження: макс. позицій={self.max_concurrent_positions}, мін. сума=${self.min_trade_amount}")
     async def start(self):
         await super().start()
         save_strategy_settings('tech_analysis', enabled=True)
@@ -79,6 +75,46 @@ class TechAnalysisStrategy(BaseStrategy):
         logger.info("TechAnalysisStrategy: зупинено")
         if self.telegram_bot:
             await self.telegram_bot.send_strategy_status(self.name, False)
+
+    async def _save_trade_chart_data(self, order_id: str, symbol: str, opened_at: datetime):
+        """Збереження свічок для угоди"""
+        try:
+            from database.db import save_price_history
+
+            # Розширюємо діапазон: 6 годин до і 4 години після
+            start_ts = int(opened_at.timestamp() * 1000) - 6 * 3600 * 1000
+            end_ts = int(opened_at.timestamp() * 1000) + 4 * 3600 * 1000
+
+            # Отримуємо свічки з таймфреймом 15 хвилин для кращого охоплення
+            klines = await self.exchange.get_klines(symbol, '15', limit=500)
+
+            if not klines:
+                logger.warning(f"[{symbol}] Не вдалося отримати свічки для {order_id}")
+                # Спроба з 5-хвилинним таймфреймом
+                klines = await self.exchange.get_klines(symbol, '5', limit=300)
+
+            if not klines:
+                logger.warning(f"[{symbol}] Не вдалося отримати свічки для {order_id} навіть з 5хв")
+                return
+
+            klines.sort(key=lambda k: k['timestamp'])
+
+            # Фільтруємо свічки за діапазоном
+            filtered = [k for k in klines if start_ts <= k['timestamp'] <= end_ts]
+
+            # Якщо немає свічок в діапазоні, беремо всі (але не більше 500)
+            if len(filtered) < 10:
+                filtered = klines[-300:] if len(klines) > 300 else klines
+                logger.warning(f"[{symbol}] Недостатньо свічок в діапазоні, беремо останні {len(filtered)}")
+
+            for k in filtered:
+                k['time_iso'] = datetime.utcfromtimestamp(k['timestamp'] / 1000).strftime('%Y-%m-%dT%H:%M:%S')
+
+            save_price_history(order_id, symbol, filtered)
+            logger.info(f"[{symbol}] Збережено {len(filtered)} свічок для угоди {order_id}")
+
+        except Exception as e:
+            logger.error(f"Помилка збереження свічок для {order_id}: {e}")
 
     @property
     def available_balance(self):
@@ -352,6 +388,7 @@ class TechAnalysisStrategy(BaseStrategy):
         self.locked_balance += trade_amount
         self.last_trade_time[symbol] = datetime.now()  # Запам'ятовуємо час угоди
         self._save_order(order_id, symbol, side, price, quantity, 'open', 'LONG' if is_long else 'SHORT')
+        await self._save_trade_chart_data(order_id, symbol, datetime.now())
 
         signal_text = "LONG (КУПІВЛЯ)" if is_long else "SHORT (ПРОДАЖ)"
         logger.info(f"[TechAnalysis] 📈 Відкрито позицію {symbol}: {signal_text} {quantity:.6f} @ ${price:.2f}")
