@@ -253,19 +253,14 @@ class NewsStrategy(BaseStrategy):
 
         if not self.can_trade():
             add_log("WARNING", self.name, f"Торгівля заблокована: {self._block_reason}")
-            logger.warning(f"[News] Торгівля заблокована: {self._block_reason}")
             return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
 
-        # Перевіряємо чи потрібно оновлення
+        # Логуємо поточний стан
+        add_log("DEBUG", self.name,
+                f"Аналіз новин: enabled={self.enabled}, balance=${self.balance}, open_positions={len(self.open_positions)}")
+
         need_update = (self.last_update is None or
                        (datetime.now() - self.last_update).seconds > self.interval_minutes * 60)
-
-        # Додаткова перевірка на помилку 429 - не оновлюємо якщо остання помилка була менше 1 години тому
-        if need_update and hasattr(self, '_last_error_time') and self._last_error_time:
-            error_age = (datetime.now() - self._last_error_time).seconds
-            if error_age < 3600:  # 1 година
-                logger.info(f"[News] Пропускаємо оновлення через помилку 429 (минуло {error_age // 60} хвилин)")
-                need_update = False
 
         if need_update:
             add_log("INFO", self.name, "Початок оновлення новин")
@@ -273,34 +268,31 @@ class NewsStrategy(BaseStrategy):
 
             articles = await self.fetch_news()
 
-            # Якщо fetch_news повернув пустий список через помилку 429
-            if articles is None:
-                # Вже залоговано в fetch_news
+            if articles is None or len(articles) == 0:
+                add_log("WARNING", self.name, "Новин не отримано")
                 return {'action': 'hold', 'sentiment': self.current_sentiment}
 
             self.last_news = articles
             self.last_update = datetime.now()
 
-            # ЗБЕРІГАЄМО ЧАС ОСТАННЬОГО ОНОВЛЕННЯ В БД
-            try:
-                from database.db import get_db
-                with get_db() as conn:
-                    conn.execute(
-                        "INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)",
-                        ('news_last_update', self.last_update.isoformat())
-                    )
-            except Exception as e:
-                logger.error(f"Помилка збереження часу оновлення: {e}")
+            # Зберігаємо час оновлення в БД
+            with get_db() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)",
+                    ('news_last_update', self.last_update.isoformat())
+                )
 
             add_log("INFO", self.name, f"Отримано {len(articles)} новин")
 
             if articles:
                 sent = self.analyze_sentiment(articles)
                 self.current_sentiment = sent['overall']
+
+                # Логуємо результат аналізу
                 add_log("INFO", self.name,
                         f"Сентимент: {self.current_sentiment} (поз:{sent['positive']}, нег:{sent['negative']}, нейтр:{sent['neutral']})")
 
-                # ЗБЕРІГАЄМО СЕНТИМЕНТ В БД
+                # Зберігаємо сентимент
                 from database.db import save_sentiment_history
                 save_sentiment_history(
                     overall=sent['overall'],
@@ -310,13 +302,19 @@ class NewsStrategy(BaseStrategy):
                     articles_count=len(articles)
                 )
 
-                add_log("INFO", self.name,
-                        f"Сентимент: {self.current_sentiment} (поз:{sent['positive']}, нег:{sent['negative']})")
+                # Генеруємо сигнал
                 signal = self._generate_signal(sent)
+                add_log("INFO", self.name, f"Згенеровано сигнал: {signal}")
+
+                # ВИКОНУЄМО СИГНАЛ (раніше цього не було!)
+                if signal.get('action') == 'buy':
+                    add_log("INFO", self.name, "Виконуємо сигнал КУПІВЛІ")
+                    await self._execute_buy_signal()
+                elif signal.get('action') == 'sell':
+                    add_log("INFO", self.name, "Виконуємо сигнал ПРОДАЖУ")
+                    await self._execute_sell_signal()
+
                 return signal
-            else:
-                add_log("DEBUG", self.name, "Новин не отримано (можливо ліміт API)")
-                return {'action': 'hold', 'sentiment': self.current_sentiment}
 
         return {'action': 'hold', 'sentiment': self.current_sentiment}
 

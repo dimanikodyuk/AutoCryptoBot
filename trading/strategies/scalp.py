@@ -820,6 +820,7 @@ class ScalpStrategy(BaseStrategy):
             self._save_order(order_id, symbol, 'buy', current_price, quantity, 'open', stop_loss_price,
                              take_profit_price)
 
+
             await self._save_trade_chart_data(order_id, symbol, datetime.now())
 
             signal_type = "🔥 СИЛЬНИЙ СИГНАЛ" if strong else "✅ Звичайний сигнал"
@@ -843,6 +844,27 @@ class ScalpStrategy(BaseStrategy):
 
         finally:
             self._opening_positions.discard(symbol)
+
+    async def update_open_positions_pnl(self):
+        """Оновлення PnL для відкритих позицій в БД"""
+        for symbol, position in self.open_positions.items():
+            current_price = self.current_prices.get(symbol, position['entry_price'])
+            if position['side'] == 'buy':
+                unrealized_pnl = (current_price - position['entry_price']) * position['quantity']
+            else:
+                unrealized_pnl = (position['entry_price'] - current_price) * position['quantity']
+
+            commission_rate = 0.001
+            commission = (position['quantity'] * position['entry_price'] + position[
+                'quantity'] * current_price) * commission_rate
+            real_pnl = unrealized_pnl - commission
+
+            # Оновлюємо pnl в БД для відкритого ордера
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE orders SET pnl = ? WHERE order_id = ? AND status = 'open'",
+                    (real_pnl, position['order_id'])
+                )
 
     async def _close_position(self, symbol: str, reason: str, price: float):
         # Захист від дублювання закриття

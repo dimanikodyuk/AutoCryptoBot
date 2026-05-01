@@ -707,11 +707,9 @@
             </div>
 
             <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
-    <button class="btn-toggle" onclick="toggleTechAnalysis()" id="taToggleBtn">✅ Запустити стратегію</button>
-    <button class="btn-reset" onclick="resetTechAnalysis()">🔄 Скинути стратегію</button>
-    <button onclick="testCreateForecast()" style="background: #9b59b6;">🧪 Створити тестовий прогноз</button>
-    <button onclick="checkForecastDB()" style="background: #007bff;">🔍 Перевірити БД прогнозів</button>
-</div>
+                <button onclick="testCreateForecast()" style="background: #9b59b6;">🧪 Створити тестовий прогноз</button>
+                <button onclick="checkForecastDB()" style="background: #007bff;">🔍 Перевірити БД прогнозів</button>
+            </div>
 
             <!-- Статистика -->
             <div class="stats-grid" id="taStats">
@@ -843,12 +841,7 @@
     </div>
 </div>
 
-            <!-- Кнопки керування -->
-            <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
-                <button class="btn-toggle" onclick="toggleTechAnalysis()" id="taToggleBtn">✅ Запустити стратегію</button>
-                <button class="btn-reset" onclick="resetTechAnalysis()">🔄 Скинути стратегію</button>
-            </div>
-        </div>
+    </div>  <!-- ← ЦЕ ЗАКРИТТЯ id="tab-tech-analysis" -->
 
         <!-- Вкладка Діагностика -->
         <div id="tab-health" class="tab-content">
@@ -900,7 +893,9 @@
                         <option value="ERROR">❌ ERROR</option>
                     </select>
                     <label>🎯 Модуль:</label>
-                    <select id="logModuleFilter" onchange="loadLogs()"><option value="all">📁 Всі модулі</option></select>
+                    <select id="logModuleFilter" onchange="loadLogs()">
+                        <option value="all">📁 Всі модулі</option>
+                    </select>
                     <label>🔢 На сторінці:</label>
                     <select id="logPerPage" onchange="loadLogs()">
                         <option value="20">20</option>
@@ -910,6 +905,17 @@
                     </select>
                     <button class="btn-refresh" onclick="loadLogs()">🔍 Завантажити</button>
                     <button onclick="clearAllLogs()" style="background: #dc3545;">🗑️ Очистити всі</button>
+                </div>
+                <div class="settings-row" style="margin-top: 10px;">
+                    <span>📌 Швидкі фільтри:</span>
+                    <button onclick="loadLogsByModule('scalp')" style="background: #007bff;">⚡ Scalp</button>
+                    <button onclick="loadLogsByModule('news')" style="background: #28a745;">📰 News</button>
+                    <button onclick="loadLogsByModule('tech_analysis')" style="background: #9b59b6;">📊 Tech Analysis</button>
+                    <button onclick="loadLogsByModule('grid')" style="background: #ff8800;">🎯 Grid</button>
+                    <button onclick="loadLogsByModule('signals')" style="background: #00d4ff;">📡 Signals</button>
+                    <button onclick="loadLogsByModule('engine')" style="background: #dc3545;">⚙️ Engine</button>
+                    <button onclick="loadLogsByModule('exchange')" style="background: #17a2b8;">🔄 Exchange</button>
+                    <button onclick="loadLogs()" style="background: #6c757d;">📋 Всі</button>
                 </div>
             </div>
 
@@ -932,7 +938,8 @@
                 <button onclick="loadLogsPage('next')" id="nextLogPageBtn">Наступна →</button>
             </div>
         </div>
-    </div>
+
+    </div> <!-- ← ЗАКРИВАЄМО .container -->
 
     <!-- Модальне вікно угоди -->
     <div id="tradeModal" class="modal">
@@ -3911,6 +3918,37 @@ async function closeAllTechPositions() {
     } catch(e) {
         console.error('Помилка закриття всіх позицій:', e);
         alert(`❌ Помилка: ${e.message}`);
+    }
+}
+
+async function loadLogsByModule(module) {
+    const level = document.getElementById('logLevelFilter').value;
+    const perPage = document.getElementById('logPerPage').value;
+
+    try {
+        const response = await fetch(`/api/logs?page=1&per_page=${perPage}&module=${module}&level=${level}`);
+        const data = await response.json();
+
+        const container = document.getElementById('logsContainer');
+        if (data.logs.length === 0) {
+            container.innerHTML = `<div class="loading">📭 Немає логів для модуля ${module}</div>`;
+            return;
+        }
+
+        let html = `<div class="log-group"><h4>📋 Логи модуля: ${module}</h4><div class="orders-table"><table style="width:100%"><thead><tr><th>Час</th><th>Рівень</th><th>Повідомлення</th></tr></thead><tbody>`;
+
+        for (const log of data.logs) {
+            let levelClass = 'log-info', levelIcon = '📘';
+            if (log.level === 'WARNING') { levelClass = 'log-warning'; levelIcon = '⚠️'; }
+            if (log.level === 'ERROR') { levelClass = 'log-error'; levelIcon = '❌'; }
+            html += `<tr class="${levelClass}"><td>${log.timestamp}</td><td>${levelIcon} ${log.level}</td><td>${escapeHtml(log.message)}</td></tr>`;
+        }
+
+        html += `</tbody></table></div></div>`;
+        container.innerHTML = html;
+
+    } catch(e) {
+        console.error('Помилка завантаження логів модуля:', e);
     }
 }
 
