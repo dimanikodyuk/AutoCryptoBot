@@ -1638,32 +1638,64 @@
 }
 
         async function loadScalpOrders() {
-            const side = document.getElementById('scalpOrderSideFilter')?.value || 'all';
-            const status = document.getElementById('scalpOrderStatusFilter')?.value || 'all';
-            const limit = document.getElementById('scalpOrderLimit')?.value || 20;
-            try {
-                const response = await fetch(`/api/orders?side=${side}&status=${status}&limit=${limit}&strategy=scalp`);
-                const orders = await response.json();
-                const table = document.getElementById('scalpOrdersTable');
-                if (!table) return;
-                if (orders.length === 0) { table.innerHTML = '<div class="loading">Немає ордерів</div>'; return; }
-                let html = `<table><thead><tr><th>Час</th><th>Пара</th><th>Сторона</th><th>Ціна</th><th>Кількість</th><th>Статус</th><th>PnL</th></tr></thead><tbody>`;
-                for (const o of orders) {
-                    const pnlValue = parseFloat(o.pnl || 0);
-                    html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${pnlValue}, '${o.opened_at}')" style="cursor:pointer;">`;
-                    html += `<td>${new Date(o.opened_at).toLocaleString()}</td>`;
-                    html += `<td>${o.symbol}</td>`;
-                    html += `<td class="${o.side}">${o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ'}</td>`;
-                    html += `<td>$${parseFloat(o.price).toFixed(2)}</td>`;
-                    html += `<td>${parseFloat(o.quantity).toFixed(6)}</td>`;
-                    html += `<td>${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td>`;
-                    html += `<td class="${pnlValue >= 0 ? 'stat-positive' : 'stat-negative'}">$${pnlValue.toFixed(2)}</td>`;
-                    html += `</tr>`;
-                }
-                html += `</tbody></table>`;
-                table.innerHTML = html;
-            } catch(e) { console.error(e); }
+    const side = document.getElementById('scalpOrderSideFilter')?.value || 'all';
+    const status = document.getElementById('scalpOrderStatusFilter')?.value || 'all';
+    const limit = document.getElementById('scalpOrderLimit')?.value || 20;
+
+    try {
+        // Правильний параметр strategy=scalp
+        const response = await fetch(`/api/orders?side=${side}&status=${status}&limit=${limit}&strategy=scalp`);
+        const orders = await response.json();
+        const table = document.getElementById('scalpOrdersTable');
+
+        if (!table) return;
+
+        if (!orders || orders.length === 0) {
+            table.innerHTML = '<div class="loading">Немає ордерів скальпінгу</div>';
+            return;
         }
+
+        let html = `<div class="orders-table">
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background: #0f0f1a; border-bottom: 2px solid #2a2a4a;">
+                        <th style="padding: 12px;">Час</th>
+                        <th style="padding: 12px;">Пара</th>
+                        <th style="padding: 12px;">Сторона</th>
+                        <th style="padding: 12px;">Ціна</th>
+                        <th style="padding: 12px;">Кількість</th>
+                        <th style="padding: 12px;">Статус</th>
+                        <th style="padding: 12px;">PnL</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        for (const o of orders) {
+            const pnlValue = parseFloat(o.pnl || 0);
+            const openedAt = new Date(o.opened_at).toLocaleString();
+            const sideClass = o.side === 'buy' ? 'buy' : 'sell';
+            const sideText = o.side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ';
+            const statusText = o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито';
+
+            html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${pnlValue}, '${o.opened_at}')" style="cursor: pointer;">
+                <td style="padding: 12px;">${openedAt}</td>
+                <td style="padding: 12px;"><strong>${o.symbol}</strong></td>
+                <td style="padding: 12px;" class="${sideClass}">${sideText}</td>
+                <td style="padding: 12px;">$${parseFloat(o.price).toFixed(2)}</td>
+                <td style="padding: 12px;">${parseFloat(o.quantity).toFixed(6)}</td>
+                <td style="padding: 12px;">${statusText}</td>
+                <td style="padding: 12px;" class="${pnlValue >= 0 ? 'buy' : 'sell'}">${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)}</td>
+            </tr>`;
+        }
+
+        html += `</tbody></table></div>`;
+        table.innerHTML = html;
+    } catch(e) {
+        console.error('Помилка loadScalpOrders:', e);
+        const table = document.getElementById('scalpOrdersTable');
+        if (table) table.innerHTML = '<div class="loading">❌ Помилка завантаження: ' + e.message + '</div>';
+    }
+}
 
         async function updateScalpSettings() {
             const symbols = document.getElementById('scalpSymbols').value.split(',').map(s => s.trim().toUpperCase());
@@ -3334,12 +3366,14 @@ async function updateScalpPnL() {
     const limit = document.getElementById('taOrdersLimit')?.value || 20;
 
     try {
+        // Використовуємо правильний параметр strategy
         const response = await fetch(`/api/orders?side=${side}&status=${status}&limit=${limit}&strategy=tech_analysis`);
         const orders = await response.json();
-        const table = document.getElementById('taOrdersTable');
 
+        const table = document.getElementById('taOrdersTable');
         if (!table) return;
-        if (orders.length === 0) {
+
+        if (!orders || orders.length === 0) {
             table.innerHTML = '<div class="loading">Немає угод для технічного аналізу</div>';
             return;
         }
@@ -3362,22 +3396,28 @@ async function updateScalpPnL() {
 
         for (const o of orders) {
             const pnlValue = parseFloat(o.pnl || 0);
+            const openedAt = new Date(o.opened_at).toLocaleString();
+            const sideClass = o.side === 'buy' ? 'buy' : 'sell';
+            const sideText = o.side === 'buy' ? '📈 LONG' : '📉 SHORT';
+            const statusText = o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито';
+
             html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${pnlValue}, '${o.opened_at}')" style="cursor: pointer; border-bottom: 1px solid #2a2a4a;">
-                <td style="padding: 12px;">${new Date(o.opened_at).toLocaleString()}</td>
+                <td style="padding: 12px;">${openedAt}</td>
                 <td style="padding: 12px;"><strong>${o.symbol}</strong></td>
-                <td style="padding: 12px;" class="${o.side === 'buy' ? 'buy' : 'sell'}">${o.side === 'buy' ? '📈 LONG' : '📉 SHORT'}</td>
+                <td style="padding: 12px;" class="${sideClass}">${sideText}</td>
                 <td style="padding: 12px;">$${parseFloat(o.price).toFixed(2)}</td>
                 <td style="padding: 12px;">${parseFloat(o.quantity).toFixed(6)}</td>
-                <td style="padding: 12px;">${o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито'}</td>
+                <td style="padding: 12px;">${statusText}</td>
                 <td style="padding: 12px;" class="${pnlValue >= 0 ? 'buy' : 'sell'}">${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)}</td>
                 <td style="padding: 12px;">${o.signal_type || '-'}</td>
-            </tr>`;
+            </table>`;
         }
+
         html += `</tbody></table></div>`;
         table.innerHTML = html;
     } catch(e) {
         console.error('Помилка завантаження угод тех. аналізу:', e);
-        document.getElementById('taOrdersTable').innerHTML = '<div class="loading">❌ Помилка завантаження</div>';
+        document.getElementById('taOrdersTable').innerHTML = '<div class="loading">❌ Помилка завантаження: ' + e.message + '</div>';
     }
 }
 

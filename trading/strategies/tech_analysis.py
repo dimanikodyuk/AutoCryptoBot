@@ -25,6 +25,10 @@ class TechAnalysisStrategy(BaseStrategy):
         self.enabled = saved.get('enabled', False)
         self.timeframe = saved.get('timeframe', '60')  # 1 година
 
+        self.max_total_position_value = self.balance * 0.5  # Максимум 50% балансу в позиціях
+        self.min_trade_amount = 10
+        self.max_concurrent_positions = 2  # Максимум 2 позиції
+
         # Параметри торгівлі
         self.trade_size_percent = saved.get('trade_size_percent', 50)
         self.take_profit_percent = saved.get('take_profit_percent', 4.0)
@@ -83,25 +87,22 @@ class TechAnalysisStrategy(BaseStrategy):
     def get_current_balance(self) -> float:
         return self.balance
 
-    def can_open_new_position(self, symbol: str = None) -> bool:
+    def can_open_new_position(self, symbol: str = None, required_amount: float = None) -> bool:
         """Перевірка чи можна відкрити нову позицію"""
-        # 1. Перевіряємо загальну кількість відкритих позицій
+        # Перевіряємо кількість позицій
         if len(self.open_positions) >= self.max_concurrent_positions:
             logger.debug(f"[TechAnalysis] Максимум позицій ({self.max_concurrent_positions}) досягнуто")
             return False
 
-        # 2. Перевіряємо доступний баланс
-        available = self.available_balance
-        if available < self.min_trade_amount:
-            logger.debug(f"[TechAnalysis] Недостатньо балансу: доступно ${available:.2f}, потрібно мінімум ${self.min_trade_amount:.2f}")
+        # Перевіряємо загальну заблоковану суму
+        if self.locked_balance >= self.max_total_position_value:
+            logger.debug(f"[TechAnalysis] Перевищено ліміт заблокованих коштів: ${self.locked_balance:.2f} >= ${self.max_total_position_value:.2f}")
             return False
 
-        # 3. Перевіряємо колдаун для конкретного символу
-        if symbol and symbol in self.last_trade_time:
-            time_since_last = (datetime.now() - self.last_trade_time[symbol]).total_seconds() / 60
-            if time_since_last < self.cooldown_minutes:
-                logger.debug(f"[TechAnalysis] Колдаун для {symbol}: {time_since_last:.0f}/{self.cooldown_minutes} хв")
-                return False
+        # Перевіряємо доступний баланс для нової позиції
+        if self.available_balance < self.min_trade_amount:
+            logger.debug(f"[TechAnalysis] Недостатньо балансу: доступно ${self.available_balance:.2f}")
+            return False
 
         return True
 
