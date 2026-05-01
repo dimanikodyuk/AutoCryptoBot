@@ -2408,7 +2408,12 @@ async function updateScalpPnL() {
     if (exitPrice) allPrices.push(exitPrice);
     const minP = Math.min(...allPrices);
     const maxP = Math.max(...allPrices);
-    const pad = (maxP - minP) * 0.08 || maxP * 0.005;
+    // Базовий pad від діапазону свічок, але не менше ніж потрібно для entryPrice
+    const candleRange = Math.max(...highs) - Math.min(...lows);
+    const pad = Math.max(candleRange * 0.08, (maxP - minP) * 0.05) || maxP * 0.005;
+    // Гарантуємо що entryPrice з відступом потрапляє у range
+    const yRangeMin = Math.min(minP, entryPrice || minP, exitPrice || minP) - pad;
+    const yRangeMax = Math.max(maxP, entryPrice || maxP, exitPrice || maxP) + pad;
 
     const allDates = [...dates];
     // Для X-діапазону НЕ включаємо entryDate якщо він поза межами свічок
@@ -2456,7 +2461,7 @@ async function updateScalpPnL() {
         dragmode: 'zoom',
         xaxis: { type: 'date', range: [minD, maxD], gridcolor: '#1e1e32', tickformat: '%H:%M\n%d.%m', color: '#888',
                  rangeslider: { visible: false }, domain: [0, 1] },
-        yaxis: { title: `${symbol} (USDT)`, gridcolor: '#1e1e32', range: [minP - pad, maxP + pad],
+        yaxis: { title: `${symbol} (USDT)`, gridcolor: '#1e1e32', range: [yRangeMin, yRangeMax],
                  color: '#888', tickprefix: '$', side: 'right', domain: yDomain, fixedrange: false },
         yaxis2: hasVol ? { gridcolor: '#1e1e32', color: '#888', domain: y2Domain, fixedrange: true, showticklabels: false }
                        : { overlaying: 'y', visible: false },
