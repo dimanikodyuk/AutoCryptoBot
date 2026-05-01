@@ -234,14 +234,39 @@ class TechAnalysisStrategy(BaseStrategy):
                   'Market', datetime.now().isoformat(), signal_type))
 
     async def _analysis_loop(self):
+        last_stale_check = datetime.now()
+
         while self.enabled:
             try:
                 await self.analyze()
+
+                # Перевіряємо "застарілі" позиції кожні 5 хвилин
+                now = datetime.now()
+                if (now - last_stale_check).total_seconds() > 300:
+                    await self.check_stale_positions(max_minutes=60)
+                    last_stale_check = now
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Помилка аналізу тех. аналізу: {e}")
             await asyncio.sleep(60)  # Кожну хвилину
+
+    async def close_all_positions(self):
+        """Закриття всіх відкритих позицій"""
+        logger.warning(f"[TechAnalysis] Закриваємо всі {len(self.open_positions)} позицій")
+        for symbol in list(self.open_positions.keys()):
+            try:
+                current_price = self.current_prices.get(symbol, 0)
+                if current_price > 0:
+                    await self._close_position(symbol, current_price, "manual_close")
+                else:
+                    # Якщо немає поточної ціни, використовуємо ціну входу
+                    position = self.open_positions.get(symbol)
+                    if position:
+                        await self._close_position(symbol, position['entry_price'], "manual_close")
+            except Exception as e:
+                logger.error(f"[TechAnalysis] Помилка закриття позиції {symbol}: {e}")
 
     async def analyze(self) -> dict:
         if not self.enabled:
@@ -252,12 +277,22 @@ class TechAnalysisStrategy(BaseStrategy):
 
         signals_generated = []
 
+        # Логуємо поточний стан
+        logger.info(f"[TechAnalysis] Стан: баланс=${self.balance:.2f}, доступно=${self.available_balance:.2f}, "
+                    f"відкрито позицій: {len(self.open_positions)}/{self.max_concurrent_positions}")
+
         for symbol in self.symbols:
             try:
-                # Пропускаємо символи, які вже у відкритих позиціях
+                # Пропускаємо якщо вже є відкрита позиція для цього символу
                 if symbol in self.open_positions:
                     # Перевіряємо чи пора закривати
                     await self._check_exit(symbol, self.current_prices.get(symbol, 0))
+                    continue
+
+                # Пропускаємо якщо досягнуто ліміту позицій
+                if len(self.open_positions) >= self.max_concurrent_positions:
+                    logger.debug(
+                        f"[TechAnalysis] Ліміт позицій ({self.max_concurrent_positions}) досягнуто, пропускаємо {symbol}")
                     continue
 
                 indicators = await self._get_indicators(symbol)
@@ -266,6 +301,11 @@ class TechAnalysisStrategy(BaseStrategy):
 
                 price = indicators['price']
                 self.current_prices[symbol] = price
+
+                # Перевірка балансу перед відкриттям
+                if self.available_balance < self.min_trade_amount:
+                    logger.debug(f"[TechAnalysis] Недостатньо балансу для нової позиції: ${self.available_balance:.2f}")
+                    continue
 
                 # Перевіряємо чи можна відкривати нову позицію
                 if not self.can_open_new_position(symbol):
@@ -423,31 +463,53 @@ class TechAnalysisStrategy(BaseStrategy):
     async def _open_position(self, symbol: str, price: float, indicators: dict, is_long: bool = True):
         """Відкриття позиції (віртуальне або реальне)"""
 
-        # Подвійна перевірка
-        if not self.can_open_new_position(symbol):
-            logger.info(f"[TechAnalysis] Пропускаємо відкриття {symbol}, ліміт позицій досягнуто")
+        # Перевіряємо чи вже є відкрита позиція для цього символу
+        if symbol in self.open_positions:
+            logger.info(f"[TechAnalysis] Позиція для {symbol} вже відкрита, пропускаємо")
             return
 
-        # Розраховуємо розмір угоди (обмежуємо 25% від балансу)
+        # Перевіряємо кількість відкритих позицій
+        if len(self.open_positions) >= self.max_concurrent_positions:
+            logger.info(
+                f"[TechAnalysis] Максимум позицій ({self.max_concurrent_positions}) досягнуто, пропускаємо {symbol}")
+            return
+
+        # Оновлюємо максимальне значення позиції на основі поточного балансу
+        self.max_total_position_value = self.balance * 0.5
+
+        # Перевіряємо чи можна відкривати нову позицію
+        if not self.can_open_new_position(symbol):
+            logger.info(f"[TechAnalysis] can_open_new_position повернув False для {symbol}")
+            return
+
+        # Розраховуємо розмір угоди
         max_per_position = self.balance * 0.25
         trade_amount = min(
             self.balance * (self.trade_size_percent / 100),
-            max_per_position
+            max_per_position,
+            self.available_balance
         )
 
         if trade_amount < self.min_trade_amount:
             trade_amount = self.min_trade_amount
 
+        # Фінальна перевірка балансу
+        if trade_amount > self.available_balance:
+            logger.warning(
+                f"[TechAnalysis] Недостатньо балансу для {symbol}: потрібно ${trade_amount:.2f}, доступно ${self.available_balance:.2f}")
+            return
+
         quantity = trade_amount / price
 
         # Перевірка мінімальної кількості
-        min_qty = 0.0001 if 'BTC' in symbol else 0.001
+        min_qty = 0.0001 if 'BTC' in symbol or 'ETH' in symbol else 0.001
         if quantity < min_qty:
             quantity = min_qty
             trade_amount = quantity * price
 
         if self.available_balance < trade_amount:
-            logger.warning(f"[TechAnalysis] Недостатньо балансу: потрібно ${trade_amount:.2f}, доступно ${self.available_balance:.2f}")
+            logger.warning(
+                f"[TechAnalysis] Недостатньо балансу: потрібно ${trade_amount:.2f}, доступно ${self.available_balance:.2f}")
             return
 
         side = 'buy' if is_long else 'sell'
@@ -471,14 +533,18 @@ class TechAnalysisStrategy(BaseStrategy):
         }
 
         self.locked_balance += trade_amount
-        self.last_trade_time[symbol] = datetime.now()  # Запам'ятовуємо час угоди
+        self.last_trade_time[symbol] = datetime.now()
         self._save_order(order_id, symbol, side, price, quantity, 'open', 'LONG' if is_long else 'SHORT')
+
+        # Зберігаємо свічки для графіка
         await self._save_trade_chart_data(order_id, symbol, datetime.now())
         await self._save_candles_for_order(order_id, symbol, price, datetime.now())
 
         signal_text = "LONG (КУПІВЛЯ)" if is_long else "SHORT (ПРОДАЖ)"
         logger.info(f"[TechAnalysis] 📈 Відкрито позицію {symbol}: {signal_text} {quantity:.6f} @ ${price:.2f}")
-        logger.info(f"[TechAnalysis] Стан: відкрито {len(self.open_positions)}/{self.max_concurrent_positions} позицій")
+        logger.info(
+            f"[TechAnalysis] Стан: відкрито {len(self.open_positions)}/{self.max_concurrent_positions} позицій, "
+            f"заблоковано ${self.locked_balance:.2f}, доступно ${self.available_balance:.2f}")
 
         if self.telegram_bot:
             await self.telegram_bot.send_notification(
@@ -495,6 +561,22 @@ class TechAnalysisStrategy(BaseStrategy):
 
         self.increment_daily_trades()
         self.update_balance_for_drawdown()
+
+    async def check_stale_positions(self, max_minutes: int = 60):
+        """Перевірка та закриття позицій, які занадто довго відкриті"""
+        now = datetime.now()
+        for symbol, position in list(self.open_positions.items()):
+            try:
+                opened_at = datetime.fromisoformat(position['opened_at'])
+                minutes_open = (now - opened_at).total_seconds() / 60
+
+                if minutes_open > max_minutes:
+                    logger.warning(
+                        f"[TechAnalysis] Позиція {symbol} відкрита вже {minutes_open:.0f} хв, закриваємо за часом")
+                    current_price = self.current_prices.get(symbol, position['entry_price'])
+                    await self._close_position(symbol, current_price, "timeout")
+            except Exception as e:
+                logger.error(f"[TechAnalysis] Помилка перевірки позиції {symbol}: {e}")
 
     async def _check_exit(self, symbol: str, current_price: float):
         """Перевірка виходу з позиції"""
@@ -591,6 +673,41 @@ class TechAnalysisStrategy(BaseStrategy):
 
     async def get_status(self) -> dict:
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades else 0
+
+        # Розраховуємо поточний PnL для кожної відкритої позиції
+        positions_with_pnl = {}
+        for symbol, position in self.open_positions.items():
+            current_price = self.current_prices.get(symbol, position['entry_price'])
+            entry_price = position['entry_price']
+            quantity = position['quantity']
+            side = position['side']
+
+            if side == 'buy':
+                unrealized_pnl = (current_price - entry_price) * quantity
+                unrealized_pnl_percent = (current_price - entry_price) / entry_price * 100
+            else:  # sell (short)
+                unrealized_pnl = (entry_price - current_price) * quantity
+                unrealized_pnl_percent = (entry_price - current_price) / entry_price * 100
+
+            # Комісія (0.1% на вхід і вихід)
+            commission_rate = 0.001
+            estimated_commission = (quantity * entry_price + quantity * current_price) * commission_rate
+            estimated_real_pnl = unrealized_pnl - estimated_commission
+
+            positions_with_pnl[symbol] = {
+                'order_id': position['order_id'],
+                'entry_price': entry_price,
+                'quantity': quantity,
+                'side': side,
+                'opened_at': position['opened_at'],
+                'signal_type': position.get('signal_type', 'LONG' if side == 'buy' else 'SHORT'),
+                'current_price': current_price,
+                'unrealized_pnl': round(unrealized_pnl, 4),
+                'unrealized_pnl_percent': round(unrealized_pnl_percent, 2),
+                'estimated_real_pnl': round(estimated_real_pnl, 4),
+                'estimated_commission': round(estimated_commission, 4)
+            }
+
         return {
             'id': self.strategy_id,
             'name': self.name,
@@ -605,7 +722,7 @@ class TechAnalysisStrategy(BaseStrategy):
             'losing_trades': self.losing_trades,
             'win_rate': round(win_rate, 1),
             'symbols': self.symbols,
-            'open_positions': self.open_positions,
+            'open_positions': positions_with_pnl,  # ← тепер з PnL
             'current_prices': self.current_prices,
             'trade_size_percent': self.trade_size_percent,
             'take_profit_percent': self.take_profit_percent,
@@ -616,7 +733,7 @@ class TechAnalysisStrategy(BaseStrategy):
             'max_daily_trades': self.max_daily_trades,
             'is_blocked': self._is_blocked,
             'block_reason': self._block_reason,
-            'max_concurrent_positions': self.max_concurrent_positions,  # ← додано
+            'max_concurrent_positions': self.max_concurrent_positions,
             'settings': {
                 'trade_size_percent': self.trade_size_percent,
                 'min_confidence': self.min_confidence,

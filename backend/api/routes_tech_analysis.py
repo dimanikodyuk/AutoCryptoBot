@@ -513,3 +513,52 @@ async def create_forecast_manual():
     except Exception as e:
         logger.error(f"Помилка створення прогнозу: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@tech_analysis_bp.route('/close_position/<symbol>', methods=['POST'])
+@async_route
+async def close_position(symbol):
+    """Примусове закриття позиції для конкретного символу"""
+    strategy = get_tech_strategy()
+    if not strategy:
+        return jsonify({'success': False, 'error': 'Стратегія не знайдена'}), 404
+
+    try:
+        if symbol not in strategy.open_positions:
+            return jsonify({'success': False, 'error': f'Немає відкритої позиції для {symbol}'}), 404
+
+        position = strategy.open_positions[symbol]
+        current_price = strategy.current_prices.get(symbol, position['entry_price'])
+
+        # Розраховуємо PnL перед закриттям
+        entry_price = position['entry_price']
+        quantity = position['quantity']
+        side = position['side']
+
+        if side == 'buy':
+            gross_pnl = (current_price - entry_price) * quantity
+            gross_pnl_percent = (current_price - entry_price) / entry_price * 100
+        else:
+            gross_pnl = (entry_price - current_price) * quantity
+            gross_pnl_percent = (entry_price - current_price) / entry_price * 100
+
+        commission_rate = 0.001
+        commission = (quantity * entry_price + quantity * current_price) * commission_rate
+        estimated_real_pnl = gross_pnl - commission
+
+        await strategy._close_position(symbol, current_price, "manual_force_close")
+
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'entry_price': entry_price,
+            'close_price': current_price,
+            'gross_pnl': round(gross_pnl, 4),
+            'gross_pnl_percent': round(gross_pnl_percent, 2),
+            'commission': round(commission, 4),
+            'real_pnl': round(estimated_real_pnl, 4),
+            'message': f'Позицію {symbol} закрито з PnL: ${estimated_real_pnl:.4f}'
+        })
+    except Exception as e:
+        logger.error(f"Помилка закриття позиції {symbol}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500

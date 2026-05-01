@@ -820,26 +820,28 @@
             </div>
 
            <!-- Угоди технічного аналізу -->
-            <div style="margin-top: 30px;">
-                <h3>📋 Угоди технічного аналізу</h3>
-                <div class="filter-bar">
-                    <select id="taOrdersSideFilter">
-                        <option value="all">Всі сторони</option>
-                        <option value="buy">Купівля</option>
-                        <option value="sell">Продаж</option>
-                    </select>
-                    <select id="taOrdersStatusFilter">
-                        <option value="all">Всі статуси</option>
-                        <option value="open">Відкриті</option>
-                        <option value="closed">Закриті</option>
-                    </select>
-                    <input type="number" id="taOrdersLimit" placeholder="Кількість" value="20" style="width: 80px;">
-                    <button onclick="loadTechAnalysisOrders()">📋 Завантажити</button>
-                </div>
-                <div id="taOrdersTable" class="orders-table">
-                    <div class="loading">Завантаження угод...</div>
-                </div>
-            </div>
+            <!-- Угоди технічного аналізу -->
+<div style="margin-top: 30px;">
+    <h3>📋 Угоди технічного аналізу</h3>
+    <div class="filter-bar">
+        <select id="taOrdersSideFilter">
+            <option value="all">Всі сторони</option>
+            <option value="buy">Купівля</option>
+            <option value="sell">Продаж</option>
+        </select>
+        <select id="taOrdersStatusFilter">
+            <option value="all">Всі статуси</option>
+            <option value="open">Відкриті</option>
+            <option value="closed">Закриті</option>
+        </select>
+        <input type="number" id="taOrdersLimit" placeholder="Кількість" value="20" style="width: 80px;">
+        <button onclick="loadTechAnalysisOrders()">📋 Завантажити</button>
+        <button onclick="closeAllTechPositions()" style="background: #dc3545;">❌ Закрити ВСІ позиції</button>
+    </div>
+    <div id="taOrdersTable" class="orders-table">
+        <div class="loading">Завантаження угод...</div>
+    </div>
+</div>
 
             <!-- Кнопки керування -->
             <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
@@ -4049,7 +4051,6 @@ function detectCandlePatterns(klines) {
             return;
         }
 
-        // ОЧИЩУЄМО ТАБЛИЦЮ ПЕРЕД ЗАПОВНЕННЯМ
         table.innerHTML = '';
 
         let html = `
@@ -4060,11 +4061,12 @@ function detectCandlePatterns(klines) {
                             <th style="padding: 12px; text-align: left;">Час</th>
                             <th style="padding: 12px; text-align: left;">Пара</th>
                             <th style="padding: 12px; text-align: left;">Сторона</th>
-                            <th style="padding: 12px; text-align: left;">Ціна</th>
+                            <th style="padding: 12px; text-align: left;">Ціна входу</th>
+                            <th style="padding: 12px; text-align: left;">Поточна ціна</th>
                             <th style="padding: 12px; text-align: left;">Кількість</th>
                             <th style="padding: 12px; text-align: left;">Статус</th>
                             <th style="padding: 12px; text-align: left;">PnL</th>
-                            <th style="padding: 12px; text-align: left;">Сигнал</th>
+                            <th style="padding: 12px; text-align: left;">Дія</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -4076,17 +4078,26 @@ function detectCandlePatterns(klines) {
             const sideClass = o.side === 'buy' ? 'buy' : 'sell';
             const sideText = o.side === 'buy' ? '📈 LONG' : '📉 SHORT';
             const statusText = o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито';
+            const currentPrice = o.status === 'open' ? (window.techCurrentPrices?.[o.symbol] || o.price) : o.closed_price || o.price;
+            const currentPnl = o.status === 'open' ? (o.side === 'buy' ?
+                (currentPrice - o.price) * o.quantity :
+                (o.price - currentPrice) * o.quantity) : pnlValue;
+            const pnlClass = currentPnl >= 0 ? 'buy' : 'sell';
+            const pnlSign = currentPnl >= 0 ? '+' : '';
 
             html += `
-                <tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${pnlValue}, '${o.opened_at}')" style="cursor: pointer; border-bottom: 1px solid #2a2a4a;">
+                <tr style="border-bottom: 1px solid #2a2a4a;">
                     <td style="padding: 12px;">${openedAt}</td>
                     <td style="padding: 12px;"><strong>${o.symbol}</strong></td>
                     <td style="padding: 12px;" class="${sideClass}">${sideText}</td>
                     <td style="padding: 12px;">$${parseFloat(o.price).toFixed(2)}</td>
+                    <td style="padding: 12px; color: #00d4ff;">$${parseFloat(currentPrice).toFixed(2)}</td>
                     <td style="padding: 12px;">${parseFloat(o.quantity).toFixed(6)}</td>
                     <td style="padding: 12px;">${statusText}</td>
-                    <td style="padding: 12px;" class="${pnlValue >= 0 ? 'buy' : 'sell'}">${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)}</td>
-                    <td style="padding: 12px;">${o.signal_type || '-'}</td>
+                    <td style="padding: 12px;" class="${pnlClass}">${pnlSign}$${Math.abs(currentPnl).toFixed(2)}</td>
+                    <td style="padding: 12px;" onclick="event.stopPropagation()">
+                        ${o.status === 'open' ? `<button class="btn-small" style="background:#dc3545;" onclick="forceCloseTechPosition('${o.symbol}', '${o.order_id}')">❌ Закрити</button>` : '-'}
+                    </td>
                 </tr>
             `;
         }
@@ -4096,12 +4107,55 @@ function detectCandlePatterns(klines) {
                 </table>
             </div>
         `;
-
         table.innerHTML = html;
 
     } catch(e) {
         console.error('Помилка завантаження угод тех. аналізу:', e);
         document.getElementById('taOrdersTable').innerHTML = '<div class="loading">❌ Помилка завантаження: ' + e.message + '</div>';
+    }
+}
+
+async function forceCloseTechPosition(symbol, orderId) {
+    if (!confirm(`⚠️ Примусово закрити позицію ${symbol}?\\nЦю дію не можна скасувати!`)) return;
+
+    const btn = event?.target;
+    const originalText = btn ? btn.innerText : 'Закрити';
+    if (btn) {
+        btn.innerText = '⏳ Закриваю...';
+        btn.disabled = true;
+    }
+
+    try {
+        const response = await fetch(`/api/tech_analysis/close_position/${symbol}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            const pnlIcon = result.real_pnl >= 0 ? '✅' : '❌';
+            alert(`📉 Позицію ${symbol} закрито!\n\n` +
+                  `Вхід: $${result.entry_price.toFixed(2)}\n` +
+                  `Вихід: $${result.close_price.toFixed(2)}\n` +
+                  `Валовий PnL: ${result.gross_pnl >= 0 ? '+' : ''}$${result.gross_pnl.toFixed(4)} (${result.gross_pnl_percent >= 0 ? '+' : ''}${result.gross_pnl_percent}%)\n` +
+                  `Комісія: $${result.commission.toFixed(4)}\n` +
+                  `РЕАЛЬНИЙ PnL: ${pnlIcon} $${result.real_pnl.toFixed(4)}`);
+
+            // Оновлюємо дані
+            loadTechAnalysisStatus();
+            loadTechAnalysisOrders();
+            loadAllData();
+        } else {
+            alert(`❌ Помилка: ${result.error || 'невідома'}`);
+        }
+    } catch(e) {
+        console.error('Помилка закриття позиції:', e);
+        alert(`❌ Помилка: ${e.message}`);
+    } finally {
+        if (btn) {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
     }
 }
 
