@@ -2375,21 +2375,6 @@ async function updateScalpPnL() {
                       yaxis: 'y2', hovertemplate: '%{y:.0f}<extra>VOL</extra>' });
     }
 
-    // Точка входу
-    if (entryDate && entryPrice) {
-        // Визначаємо колір залежно від сторони угоди
-        const entryColor = side === 'buy' ? '#00ff88' : '#ff4444';
-        const entrySymbol = side === 'buy' ? '▲' : '▼';
-        const entryText = side === 'buy' ? '🟢 ВХІД LONG' : '🔴 ВХІД SHORT';
-
-        traces.push({ type: 'scatter', mode: 'markers+text', x: [entryDate], y: [entryPrice],
-                      name: entryText, marker: { color: entryColor, size: 16, symbol: 'triangle-up',
-                      line: { color: '#fff', width: 2 } },
-                      text: [`  ВХІД $${entryPrice.toFixed(2)}`], textposition: 'middle right',
-                      textfont: { color: entryColor, size: 12, family: 'Arial Black' },
-                      yaxis: 'y', hovertemplate: `${entryText}<br>${entryDate.toLocaleString()}<br>$${entryPrice.toFixed(2)}<extra></extra>` });
-    }
-
     // Точка виходу
     if (exitDate && exitPrice) {
         const pnlPct = ((exitPrice - entryPrice) / entryPrice * 100).toFixed(2);
@@ -2417,7 +2402,7 @@ async function updateScalpPnL() {
                       yaxis: 'y', showlegend: false, hoverinfo: 'skip' });
     }
 
-    // Розрахунок діапазону для осі Y (додаємо відступи)
+    // Розрахунок діапазону для осі Y (включаємо ціну входу завжди)
     const allPrices = [...closes, ...highs, ...lows];
     if (entryPrice) allPrices.push(entryPrice);
     if (exitPrice) allPrices.push(exitPrice);
@@ -2426,7 +2411,9 @@ async function updateScalpPnL() {
     const pad = (maxP - minP) * 0.08 || maxP * 0.005;
 
     const allDates = [...dates];
-    if (entryDate) allDates.push(entryDate);
+    // Для X-діапазону НЕ включаємо entryDate якщо він поза межами свічок
+    const klinesMinDate2 = dates.length > 0 ? dates[0] : null;
+    const klinesMaxDate2 = dates.length > 0 ? dates[dates.length - 1] : null;
     if (exitDate) allDates.push(exitDate);
     const minD = new Date(Math.min(...allDates) - 2 * 60000);
     const maxD = new Date(Math.max(...allDates) + 2 * 60000);
@@ -2437,12 +2424,28 @@ async function updateScalpPnL() {
 
     const shapes = [];
 
-    // Додаємо горизонтальну лінію для ціни входу (пунктирна)
-    if (entryPrice) {
+    // Точка входу та горизонтальна лінія
+    const entryColor = side === 'buy' ? '#00ff88' : '#ff4444';
+    const entryText2 = side === 'buy' ? '🟢 ВХІД LONG' : '🔴 ВХІД SHORT';
+    const klinesMinDate = dates.length > 0 ? dates[0] : null;
+    const klinesMaxDate = dates.length > 0 ? dates[dates.length - 1] : null;
+    const entryInRange = entryDate && klinesMinDate && klinesMaxDate &&
+                         entryDate >= klinesMinDate && entryDate <= klinesMaxDate;
+
+    if (entryDate && entryPrice) {
+        if (entryInRange) {
+            traces.push({ type: 'scatter', mode: 'markers+text', x: [entryDate], y: [entryPrice],
+                          name: entryText2, marker: { color: entryColor, size: 16, symbol: 'triangle-up',
+                          line: { color: '#fff', width: 2 } },
+                          text: [`  ВХІД $${entryPrice.toFixed(2)}`], textposition: 'middle right',
+                          textfont: { color: entryColor, size: 12, family: 'Arial Black' },
+                          yaxis: 'y', hovertemplate: `${entryText2}<br>${entryDate.toLocaleString()}<br>$${entryPrice.toFixed(2)}<extra></extra>` });
+        }
+        // Горизонтальна пунктирна лінія ціни входу — завжди видима
         shapes.push({
             type: 'line', x0: 0, x1: 1, xref: 'paper',
             y0: entryPrice, y1: entryPrice, yref: 'y',
-            line: { color: side === 'buy' ? '#00ff8866' : '#ff444466', width: 1.5, dash: 'dash' }
+            line: { color: entryColor, width: 1.5, dash: 'dash' }
         });
     }
 
@@ -2458,7 +2461,14 @@ async function updateScalpPnL() {
         yaxis2: hasVol ? { gridcolor: '#1e1e32', color: '#888', domain: y2Domain, fixedrange: true, showticklabels: false }
                        : { overlaying: 'y', visible: false },
         legend: { bgcolor: 'rgba(15,15,26,0.9)', bordercolor: '#2a2a4a', borderwidth: 1, x: 0.01, y: 0.99, font: { size: 11 } },
-        shapes: shapes
+        shapes: shapes,
+        annotations: entryPrice ? [{
+            x: 0, y: entryPrice, xref: 'paper', yref: 'y',
+            text: `${side === 'buy' ? '🟢' : '🔴'} ВХІД $${entryPrice.toFixed(2)}${entryInRange ? '' : ' (поза графіком)'}`,
+            showarrow: false, xanchor: 'left',
+            font: { color: entryColor, size: 10, family: 'Arial' },
+            bgcolor: 'rgba(0,0,0,0.6)', bordercolor: entryColor, borderwidth: 1, borderpad: 2
+        }] : []
     };
 
     const chartContainer = document.getElementById('tradeChartContainer');
