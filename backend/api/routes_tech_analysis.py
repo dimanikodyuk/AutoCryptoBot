@@ -562,3 +562,43 @@ async def close_position(symbol):
     except Exception as e:
         logger.error(f"Помилка закриття позиції {symbol}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@tech_analysis_bp.route('/close_all_positions', methods=['POST'])
+@async_route
+async def close_all_positions():
+    """Закриття всіх відкритих позицій"""
+    strategy = get_tech_strategy()
+    if not strategy:
+        return jsonify({'success': False, 'error': 'Стратегія не знайдена'}), 404
+
+    try:
+        closed_count = 0
+        total_pnl = 0.0
+
+        for symbol in list(strategy.open_positions.keys()):
+            position = strategy.open_positions[symbol]
+            current_price = strategy.current_prices.get(symbol, position['entry_price'])
+
+            # Розраховуємо PnL
+            entry_price = position['entry_price']
+            quantity = position['quantity']
+            side = position['side']
+
+            if side == 'buy':
+                pnl = (current_price - entry_price) * quantity
+            else:
+                pnl = (entry_price - current_price) * quantity
+
+            await strategy._close_position(symbol, current_price, "batch_close")
+            closed_count += 1
+            total_pnl += pnl
+
+        return jsonify({
+            'success': True,
+            'closed_count': closed_count,
+            'total_pnl': round(total_pnl, 4)
+        })
+    except Exception as e:
+        logger.error(f"Помилка закриття всіх позицій: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500

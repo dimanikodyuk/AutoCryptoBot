@@ -3890,6 +3890,30 @@ async function updateScalpPnL() {
     }
 }
 
+async function closeAllTechPositions() {
+    if (!confirm('⚠️ Примусово закрити ВСІ відкриті позиції технічного аналізу?\\nЦю дію не можна скасувати!')) return;
+
+    try {
+        const response = await fetch('/api/tech_analysis/close_all_positions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`✅ Закрито ${result.closed_count} позицій\\nЗагальний PnL: $${result.total_pnl.toFixed(2)}`);
+            loadTechAnalysisStatus();
+            loadTechAnalysisOrders();
+            loadAllData();
+        } else {
+            alert(`❌ Помилка: ${result.error || 'невідома'}`);
+        }
+    } catch(e) {
+        console.error('Помилка закриття всіх позицій:', e);
+        alert(`❌ Помилка: ${e.message}`);
+    }
+}
+
 async function checkForecastDB() {
     try {
         const response = await fetch('/api/tech_analysis/debug/check_db');
