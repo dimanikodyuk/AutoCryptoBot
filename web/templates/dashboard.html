@@ -2445,6 +2445,16 @@ async function updateScalpPnL() {
                           text: [`  ВХІД $${entryPrice.toFixed(2)}`], textposition: 'middle right',
                           textfont: { color: entryColor, size: 12, family: 'Arial Black' },
                           yaxis: 'y', hovertemplate: `${entryText2}<br>${entryDate.toLocaleString()}<br>$${entryPrice.toFixed(2)}<extra></extra>` });
+        } else {
+            // Ордер відкрито поза діапазоном свічок (щойно відкрито або дуже давно)
+            // Показуємо маркер на правому краї графіка на рівні ціни входу
+            const lastDate = dates[dates.length - 1];
+            traces.push({ type: 'scatter', mode: 'markers+text', x: [lastDate], y: [entryPrice],
+                          name: entryText2, marker: { color: entryColor, size: 16, symbol: 'triangle-up',
+                          line: { color: '#fff', width: 2 } },
+                          text: [`  ВХІД $${entryPrice.toFixed(2)} ⚡`], textposition: 'middle left',
+                          textfont: { color: entryColor, size: 12, family: 'Arial Black' },
+                          yaxis: 'y', hovertemplate: `${entryText2} (щойно відкрито)<br>$${entryPrice.toFixed(2)}<extra></extra>` });
         }
         // Горизонтальна пунктирна лінія ціни входу — завжди видима
         shapes.push({
@@ -2469,7 +2479,7 @@ async function updateScalpPnL() {
         shapes: shapes,
         annotations: entryPrice ? [{
             x: 0, y: entryPrice, xref: 'paper', yref: 'y',
-            text: `${side === 'buy' ? '🟢' : '🔴'} ВХІД $${entryPrice.toFixed(2)}${entryInRange ? '' : ' (поза графіком)'}`,
+            text: `${side === 'buy' ? '🟢' : '🔴'} ВХІД $${entryPrice.toFixed(2)}`,
             showarrow: false, xanchor: 'left',
             font: { color: entryColor, size: 10, family: 'Arial' },
             bgcolor: 'rgba(0,0,0,0.6)', bordercolor: entryColor, borderwidth: 1, borderpad: 2
