@@ -1131,37 +1131,211 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/logs_file')
     @async_route
     async def api_logs_file():
-        limit = request.args.get('limit', 200, type=int)
+        """Отримання логів з файлу"""
+        file_name = request.args.get('file', '')
+        limit = int(request.args.get('limit', 200))
         level = request.args.get('level', 'all')
-        source_filter = request.args.get('strategy', None)
-        log_file = Path(__file__).parent.parent / 'logs' / 'bot.log'
-        if not log_file.exists():
+        source_filter = request.args.get('source', '')
+        sort_order = request.args.get('sort', 'desc')
+
+        if not file_name:
             return jsonify([])
+
+        # Безпека: тільки .log файли
+        if not file_name.endswith('.log'):
+            file_name = file_name + '.log'
+
+        log_file = None
+
+        # УНІВЕРСАЛЬНИЙ ПОШУК ФАЙЛУ
+        search_dirs = [
+            Path(__file__).parent,
+            Path(__file__).parent.parent,
+            Path.cwd(),
+        ]
+
+        extra_dirs = [
+            Path('/home/pi/AutoCryptoBot'),
+            Path('/home/pi/bot'),
+            Path('/opt/bot'),
+            Path('C:/GIT/AutoCryptoBot'),
+            Path('D:/AutoCryptoBot'),
+        ]
+        search_dirs.extend(extra_dirs)
+
+        for search_dir in search_dirs:
+            # Перевіряємо в папці logs
+            logs_dir = search_dir / 'logs'
+            if logs_dir.exists():
+                potential_file = logs_dir / file_name
+                if potential_file.exists() and potential_file.is_file():
+                    log_file = potential_file
+                    logger.info(f"✅ Знайдено файл: {log_file}")
+                    break
+
+            # Перевіряємо в корені
+            potential_file = search_dir / file_name
+            if potential_file.exists() and potential_file.is_file():
+                log_file = potential_file
+                logger.info(f"✅ Знайдено файл в корені: {log_file}")
+                break
+
+        if not log_file:
+            logger.warning(f"⚠️ Файл логів не знайдено: {file_name}")
+            return jsonify([])
+
         logs = []
         try:
             with open(log_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
+                # Беремо останні N рядків
                 for line in lines[-limit:]:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    # Формат: 2024-01-01 12:00:00,123 - INFO - module - message
                     pattern = r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - (\w+) - (\w+) - (.+)'
-                    match = re.match(pattern, line.strip())
+                    match = re.match(pattern, line)
                     if match:
                         log_level = match.group(2)
                         log_source = match.group(3)
                         log_message = match.group(4)
+
                         if level != 'all' and log_level.upper() != level.upper():
                             continue
-                        if source_filter and source_filter.lower() != 'all':
-                            if source_filter.lower() not in log_source.lower():
-                                continue
+                        if source_filter and source_filter.lower() not in log_source.lower():
+                            continue
+
                         logs.append({
                             'timestamp': match.group(1),
                             'level': log_level,
                             'source': log_source,
                             'message': log_message
                         })
+                    else:
+                        # Альтернативний формат
+                        pattern2 = r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - (\w+) - (.+)'
+                        match2 = re.match(pattern2, line)
+                        if match2:
+                            log_level = match2.group(2)
+                            log_message = match2.group(3)
+
+                            if level != 'all' and log_level.upper() != level.upper():
+                                continue
+
+                            logs.append({
+                                'timestamp': match2.group(1),
+                                'level': log_level,
+                                'source': 'unknown',
+                                'message': log_message
+                            })
         except Exception as e:
+            logger.error(f"Помилка читання логів: {e}")
             return jsonify({'error': str(e)}), 500
+
+        # Сортування: новіші зверху
+        if sort_order == 'desc':
+            logs.reverse()
+
         return jsonify(logs)
+
+    @app.route('/api/logs_file/download', methods=['GET'])
+    @async_route
+    async def api_logs_file_download():
+        """Скачування файлу логів"""
+        file_name = request.args.get('file', 'bot.log')
+
+        if not file_name.endswith('.log'):
+            file_name = 'bot.log'
+
+        log_file = Path(__file__).parent.parent / 'logs' / file_name
+
+        if not log_file.exists():
+            alt_paths = [
+                Path(__file__).parent / 'logs' / file_name,
+                Path.cwd() / 'logs' / file_name,
+                Path.cwd() / file_name,
+            ]
+            for alt in alt_paths:
+                if alt.exists():
+                    log_file = alt
+                    break
+
+        if not log_file.exists():
+            return jsonify({'error': 'File not found'}), 404
+
+        from flask import send_file
+        return send_file(log_file, as_attachment=True, download_name=file_name)
+
+    @app.route('/api/logs_files_list', methods=['GET'])
+    @async_route
+    async def api_logs_files_list():
+        """Список доступних файлів логів"""
+        log_files = []
+        found_paths = set()
+
+        # Базові директорії для пошуку
+        search_dirs = [
+            Path(__file__).parent,  # де знаходиться app.py
+            Path(__file__).parent.parent,  # на рівень вище
+            Path.cwd(),  # поточна директорія
+        ]
+
+        # Додаткові шляхи для різних платформ
+        extra_dirs = [
+            Path('/home/pi/AutoCryptoBot'),
+            Path('/home/pi/bot'),
+            Path('/opt/bot'),
+            Path('C:/GIT/AutoCryptoBot'),
+            Path('D:/AutoCryptoBot'),
+        ]
+        search_dirs.extend(extra_dirs)
+
+        # Шукаємо .log файли
+        for search_dir in search_dirs:
+            logs_dir = search_dir / 'logs'
+
+            if logs_dir.exists() and logs_dir.is_dir() and logs_dir not in found_paths:
+                found_paths.add(logs_dir)
+                logger.info(f"🔍 Пошук в директорії: {logs_dir}")
+
+                for f in logs_dir.glob('*.log'):
+                    if f.exists() and f.is_file():
+                        # Отримуємо розмір в КБ
+                        size_kb = f.stat().st_size / 1024
+                        log_files.append({
+                            'name': f.name,
+                            'size': round(size_kb, 1),
+                            'size_bytes': f.stat().st_size,
+                            'modified': datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+                            'path': str(f)
+                        })
+                        logger.info(f"✅ Знайдено: {f.name} ({size_kb:.1f} KB)")
+
+            # Також шукаємо безпосередньо в корені
+            for f in search_dir.glob('*.log'):
+                if f.exists() and f.is_file():
+                    if not any(lf['name'] == f.name for lf in log_files):
+                        size_kb = f.stat().st_size / 1024
+                        log_files.append({
+                            'name': f.name,
+                            'size': round(size_kb, 1),
+                            'size_bytes': f.stat().st_size,
+                            'modified': datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+                            'path': str(f)
+                        })
+                        logger.info(f"✅ Знайдено в корені: {f.name} ({size_kb:.1f} KB)")
+
+        # Сортуємо за назвою файлу
+        log_files.sort(key=lambda x: x['name'])
+
+        if not log_files:
+            logger.warning("⚠️ Не знайдено жодного .log файлу!")
+            return jsonify([])
+
+        logger.info(f"📊 Всього знайдено {len(log_files)} файлів логів")
+        return jsonify(log_files)
 
     # ============= Свічки API =============
 

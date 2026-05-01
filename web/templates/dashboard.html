@@ -345,7 +345,9 @@
         <div class="tab" data-tab="backtest">📊 Бектестинг</div>
         <div class="tab" data-tab="metrics">📈 Метрики</div>
         <div class="tab" data-tab="database">🗄️ База даних</div>
-        <div class="tab" data-tab="logs">📋 Логи</div>
+        <div class="tab" data-tab="logs">📋 Логи БД</div>
+        <div class="tab" data-tab="file-logs">📁 Файлові логи</div>
+
         <div class="tab" data-tab="health">🩺 Діагностика</div>
     </div>
 
@@ -881,65 +883,112 @@
         </div>
 
         <!-- Логи -->
+        <!-- Логи БД -->
         <div id="tab-logs" class="tab-content">
             <div class="settings-panel">
-                <h3>📋 Фільтри логів (БД)</h3>
+                <h3>📋 Логи з бази даних</h3>
                 <div class="settings-row">
                     <label>⚠️ Рівень:</label>
-                    <select id="logLevelFilter" onchange="loadLogs()">
+                    <select id="dbLogLevelFilter" onchange="loadDbLogs()">
                         <option value="all">📋 Всі рівні</option>
                         <option value="INFO">✅ INFO</option>
                         <option value="WARNING">⚠️ WARNING</option>
                         <option value="ERROR">❌ ERROR</option>
                     </select>
                     <label>🎯 Модуль:</label>
-                    <select id="logModuleFilter" onchange="loadLogs()">
+                    <select id="dbLogModuleFilter" onchange="loadDbLogs()">
                         <option value="all">📁 Всі модулі</option>
                     </select>
                     <label>🔢 На сторінці:</label>
-                    <select id="logPerPage" onchange="loadLogs()">
+                    <select id="dbLogPerPage" onchange="loadDbLogs()">
                         <option value="20">20</option>
                         <option value="50" selected>50</option>
                         <option value="100">100</option>
                         <option value="200">200</option>
                     </select>
-                    <button class="btn-refresh" onclick="loadLogs()">🔍 Завантажити</button>
-                    <button onclick="clearAllLogs()" style="background: #dc3545;">🗑️ Очистити всі</button>
+                    <button class="btn-refresh" onclick="loadDbLogs()">🔍 Завантажити</button>
+                    <button onclick="clearAllDbLogs()" style="background: #dc3545;">🗑️ Очистити всі</button>
                 </div>
                 <div class="settings-row" style="margin-top: 10px;">
                     <span>📌 Швидкі фільтри:</span>
-                    <button onclick="loadLogsByModule('scalp')" style="background: #007bff;">⚡ Scalp</button>
-                    <button onclick="loadLogsByModule('news')" style="background: #28a745;">📰 News</button>
-                    <button onclick="loadLogsByModule('tech_analysis')" style="background: #9b59b6;">📊 Tech Analysis</button>
-                    <button onclick="loadLogsByModule('grid')" style="background: #ff8800;">🎯 Grid</button>
-                    <button onclick="loadLogsByModule('signals')" style="background: #00d4ff;">📡 Signals</button>
-                    <button onclick="loadLogsByModule('engine')" style="background: #dc3545;">⚙️ Engine</button>
-                    <button onclick="loadLogsByModule('exchange')" style="background: #17a2b8;">🔄 Exchange</button>
-                    <button onclick="loadLogs()" style="background: #6c757d;">📋 Всі</button>
+                    <button onclick="loadDbLogsByModule('scalp')" style="background: #007bff;">⚡ Scalp</button>
+                    <button onclick="loadDbLogsByModule('news')" style="background: #28a745;">📰 News</button>
+                    <button onclick="loadDbLogsByModule('tech_analysis')" style="background: #9b59b6;">📊 Tech Analysis</button>
+                    <button onclick="loadDbLogsByModule('grid')" style="background: #ff8800;">🎯 Grid</button>
+                    <button onclick="loadDbLogsByModule('signals')" style="background: #00d4ff;">📡 Signals</button>
+                    <button onclick="loadDbLogsByModule('exchange')" style="background: #17a2b8;">🔄 Exchange</button>
+                    <button onclick="loadDbLogs()" style="background: #6c757d;">📋 Всі</button>
                 </div>
             </div>
 
             <div class="settings-panel">
-                <h3>⚙️ Налаштування логування</h3>
+                <h3>⚙️ Налаштування логування (БД)</h3>
                 <div class="settings-row">
                     <label>🗑️ Авто-очищення (днів):</label>
-                    <input type="number" id="logRetentionDays" min="1" max="90" value="7" style="width: 80px;">
-                    <button onclick="updateLogRetention()" style="background: #007bff;">💾 Зберегти</button>
-                    <button onclick="runLogCleanup()" style="background: #ff8800;">🧹 Очистити зараз</button>
+                    <input type="number" id="dbLogRetentionDays" min="1" max="90" value="7" style="width: 80px;">
+                    <button onclick="updateDbLogRetention()" style="background: #007bff;">💾 Зберегти</button>
+                    <button onclick="runDbLogCleanup()" style="background: #ff8800;">🧹 Очистити зараз</button>
                 </div>
-                <div class="settings-row" id="logModulesSettings"><div class="loading">Завантаження налаштувань...</div></div>
+                <div class="settings-row" id="dbLogModulesSettings"><div class="loading">Завантаження налаштувань...</div></div>
             </div>
 
-            <div id="logsContainer" class="logs-container"><div class="loading">Завантаження логів...</div></div>
+            <div id="dbLogsContainer" class="logs-container"><div class="loading">Завантаження логів з БД...</div></div>
 
             <div class="filter-bar" style="justify-content: center; margin-top: 15px;">
-                <button onclick="loadLogsPage('prev')" id="prevLogPageBtn">← Попередня</button>
-                <span style="margin: 0 15px;" id="logPageInfo">Сторінка 1 з 1</span>
-                <button onclick="loadLogsPage('next')" id="nextLogPageBtn">Наступна →</button>
+                <button onclick="loadDbLogsPage('prev')" id="dbPrevLogPageBtn">← Попередня</button>
+                <span style="margin: 0 15px;" id="dbLogPageInfo">Сторінка 1 з 1</span>
+                <button onclick="loadDbLogsPage('next')" id="dbNextLogPageBtn">Наступна →</button>
             </div>
         </div>
 
-    </div> <!-- ← ЗАКРИВАЄМО .container -->
+        <!-- Файлові логи (ОКРЕМА ВКЛАДКА) -->
+        <!-- Файлові логи (ОКРЕМА ВКЛАДКА) -->
+<div id="tab-file-logs" class="tab-content">
+    <div class="settings-panel">
+        <h3>📁 Файлові логи (logs/*.log)</h3>
+        <div class="settings-row">
+            <label>📄 Файл:</label>
+            <select id="fileLogSelect" onchange="loadFileLogs()" style="min-width: 250px;">
+                <option value="">📁 Завантаження...</option>
+            </select>
+            <button onclick="refreshFileLogsList()" style="background: #007bff;">🔄 Оновити список</button>
+            <button onclick="testFileLogs()" style="background: #9b59b6;">🧪 Тест</button>
+            <label>⚠️ Рівень:</label>
+            <select id="fileLogLevelFilter" onchange="loadFileLogs()">
+                <option value="all">📋 Всі рівні</option>
+                <option value="INFO">✅ INFO</option>
+                <option value="WARNING">⚠️ WARNING</option>
+                <option value="ERROR">❌ ERROR</option>
+            </select>
+        </div>
+        <div class="settings-row">
+            <label>🔢 Кількість рядків:</label>
+            <select id="fileLogLimit" onchange="loadFileLogs()">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+            </select>
+            <label>📌 Фільтр за джерелом:</label>
+            <input type="text" id="fileLogSourceFilter" placeholder="scalp, grid, news..." style="width: 150px;" onkeyup="loadFileLogs()">
+            <label>
+                <input type="checkbox" id="fileLogAutoRefresh" onchange="toggleFileLogAutoRefresh()"> 🔄 Автооновлення (3с)
+            </label>
+            <label>
+                <input type="checkbox" id="fileLogSortDesc" checked onchange="loadFileLogs()"> 🕐 Новіші зверху
+            </label>
+            <button class="btn-refresh" onclick="loadFileLogs()">🔄 Оновити</button>
+            <button onclick="downloadFileLogs()" style="background: #28a745;">📥 Скачати</button>
+        </div>
+    </div>
+
+    <div id="fileLogsContainer" class="logs-container" style="max-height: 500px; overflow-y: auto; background: #0f0f1a; border-radius: 12px; padding: 10px; font-family: monospace; font-size: 12px;">
+        <div class="loading">Виберіть файл для перегляду...</div>
+    </div>
+</div>
+
+    </div>
 
     <!-- Модальне вікно угоди -->
     <div id="tradeModal" class="modal">
@@ -1008,7 +1057,8 @@
                 if (tabName === 'tech-analysis') { loadTechAnalysisStatus(); loadTechChart(); loadTechForecasts(); loadTechAnalysisOrders();}
                 if (tabName === 'signals') refreshSignalsData();
                 if (tabName === 'database') loadDatabaseInfo();
-                if (tabName === 'logs') { loadLogModules(); loadLogSettings(); loadLogs(); }
+                if (tabName === 'logs') loadDbLogModules(); loadDbLogSettings(); loadDbLogs();          // ← Логи БД
+                if (tabName === 'file-logs') loadFileLogs();    // ← Файлові логи
                 if (tabName === 'controls') { loadSystemStatus(); loadPowerStatus(); loadMode(); loadRealBalance(); }
                 if (tabName === 'backtest') setDefaultBacktestDates();
                 if (tabName === 'metrics') loadMetrics();
@@ -2140,6 +2190,11 @@ async function updateScalpPnL() {
 
         async function clearAllLogs() { if (confirm('⚠️ Очистити ВСІ логи?')) { await fetch('/api/clear_logs', { method: 'POST' }); await loadLogs(); alert('✅ Всі логи очищено'); } }
 
+        async function initFileLogsTab() {
+            await loadLogFilesList();
+            await loadFileLogs();
+        }
+
 		        // ============= СИСТЕМА =============
         async function loadSystemStatus() {
             try {
@@ -2214,6 +2269,387 @@ async function updateScalpPnL() {
                 Plotly.newPlot('powerHistoryChart', traces, layout, { responsive: true });
             } catch(e) { console.error('Помилка завантаження історії:', e); document.getElementById('powerHistoryChart').innerHTML = '<div class="loading">❌ Помилка завантаження</div>'; }
         }
+
+        // ============= ФАЙЛОВІ ЛОГИ =============
+        // ============= ЛОГИ БД =============
+// ============= ЛОГИ БД =============
+let currentDbLogPage = 1;
+let currentDbLogTotalPages = 1;
+
+async function loadDbLogs() {
+    console.log('loadDbLogs викликано');
+    currentDbLogPage = 1;
+    await doLoadDbLogs();
+}
+
+async function loadDbLogsPage(direction) {
+    if (direction === 'prev' && currentDbLogPage > 1) {
+        currentDbLogPage--;
+    } else if (direction === 'next' && currentDbLogPage < currentDbLogTotalPages) {
+        currentDbLogPage++;
+    }
+    await doLoadDbLogs();
+}
+
+async function doLoadDbLogs() {
+    const level = document.getElementById('dbLogLevelFilter')?.value || 'all';
+    const module = document.getElementById('dbLogModuleFilter')?.value || 'all';
+    const perPage = document.getElementById('dbLogPerPage')?.value || 50;
+
+    console.log(`Завантаження логів: page=${currentDbLogPage}, module=${module}, level=${level}`);
+
+    try {
+        const response = await fetch(`/api/logs?page=${currentDbLogPage}&per_page=${perPage}&module=${module}&level=${level}`);
+        const data = await response.json();
+
+        console.log(`Отримано ${data.logs?.length || 0} логів, всього ${data.total}`);
+
+        currentDbLogTotalPages = data.total_pages;
+
+        const pageInfo = document.getElementById('dbLogPageInfo');
+        const prevBtn = document.getElementById('dbPrevLogPageBtn');
+        const nextBtn = document.getElementById('dbNextLogPageBtn');
+
+        if (pageInfo) pageInfo.innerHTML = `Сторінка ${data.page} з ${data.total_pages}`;
+        if (prevBtn) prevBtn.disabled = data.page <= 1;
+        if (nextBtn) nextBtn.disabled = data.page >= data.total_pages;
+
+        const container = document.getElementById('dbLogsContainer');
+        if (!container) {
+            console.error('Контейнер dbLogsContainer не знайдено!');
+            return;
+        }
+
+        if (!data.logs || data.logs.length === 0) {
+            container.innerHTML = '<div class="loading">📭 Немає логів</div>';
+            return;
+        }
+
+        let html = '<div class="orders-table"><table style="width:100%; border-collapse: collapse;">';
+        html += '<thead><tr style="background: #0f0f1a; border-bottom: 2px solid #2a2a4a;">';
+        html += '<th style="padding: 12px; text-align: left;">Час</th>';
+        html += '<th style="padding: 12px; text-align: left;">Рівень</th>';
+        html += '<th style="padding: 12px; text-align: left;">Модуль</th>';
+        html += '<th style="padding: 12px; text-align: left;">Повідомлення</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const log of data.logs) {
+            let levelClass = 'log-info';
+            let levelIcon = '📘';
+            if (log.level === 'WARNING') { levelClass = 'log-warning'; levelIcon = '⚠️'; }
+            if (log.level === 'ERROR') { levelClass = 'log-error'; levelIcon = '❌'; }
+
+            html += `<tr class="${levelClass}" style="border-bottom: 1px solid #2a2a4a;">`;
+            html += `<td style="padding: 12px;">${log.timestamp}</td>`;
+            html += `<td style="padding: 12px;">${levelIcon} ${log.level}</td>`;
+            html += `<td style="padding: 12px;"><code>${escapeHtml(log.module)}</code></td>`;
+            html += `<td style="padding: 12px;">${escapeHtml(log.message)}</td>`;
+            html += '</tr>';
+        }
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+
+    } catch(e) {
+        console.error('Помилка завантаження логів БД:', e);
+        const container = document.getElementById('dbLogsContainer');
+        if (container) container.innerHTML = '<div class="loading">❌ Помилка завантаження: ' + e.message + '</div>';
+    }
+}
+
+async function loadDbLogsByModule(module) {
+    const select = document.getElementById('dbLogModuleFilter');
+    if (select) select.value = module;
+    await loadDbLogs();
+}
+
+async function loadDbLogModules() {
+    try {
+        const response = await fetch('/api/log_modules');
+        const modules = await response.json();
+        const select = document.getElementById('dbLogModuleFilter');
+        if (select) {
+            select.innerHTML = '<option value="all">📁 Всі модулі</option>';
+            modules.forEach(m => { select.innerHTML += `<option value="${m}">${m}</option>`; });
+        }
+    } catch(e) { console.error(e); }
+}
+
+async function loadDbLogSettings() {
+    try {
+        const response = await fetch('/api/log_settings');
+        const data = await response.json();
+        const retentionInput = document.getElementById('dbLogRetentionDays');
+        if (retentionInput) retentionInput.value = data.retention_days || 7;
+
+        const settingsContainer = document.getElementById('dbLogModulesSettings');
+        if (settingsContainer) {
+            let html = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">';
+            for (const [module, level] of Object.entries(data.modules)) {
+                html += `<div style="background: #0f0f1a; padding: 8px 12px; border-radius: 8px;">
+                    <strong>${module}</strong><br>
+                    <select onchange="updateDbModuleLogLevel('${module}', this.value)">
+                        <option value="INFO" ${level === 'INFO' ? 'selected' : ''}>📘 INFO</option>
+                        <option value="WARNING" ${level === 'WARNING' ? 'selected' : ''}>⚠️ WARNING</option>
+                        <option value="ERROR" ${level === 'ERROR' ? 'selected' : ''}>❌ ERROR</option>
+                    </select>
+                </div>`;
+            }
+            html += '</div>';
+            settingsContainer.innerHTML = html;
+        }
+    } catch(e) { console.error(e); }
+}
+
+async function updateDbModuleLogLevel(module, level) {
+    try {
+        await fetch('/api/log_settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ module, level })
+        });
+    } catch(e) { console.error(e); }
+}
+
+async function updateDbLogRetention() {
+    const days = document.getElementById('dbLogRetentionDays')?.value;
+    if (!days) return;
+    try {
+        const response = await fetch('/api/log_settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ retention_days: parseInt(days) })
+        });
+        const data = await response.json();
+        if (data.success) alert(`✅ Авто-очищення встановлено на ${days} днів`);
+    } catch(e) { console.error(e); }
+}
+
+async function runDbLogCleanup() {
+    if (!confirm('Видалити всі логи старше вказаного періоду?')) return;
+    const days = document.getElementById('dbLogRetentionDays')?.value;
+    try {
+        const response = await fetch('/api/cleanup_logs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ retention_days: parseInt(days) })
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert(`✅ Видалено ${data.deleted} старих логів`);
+            loadDbLogs();
+        }
+    } catch(e) { console.error(e); }
+}
+
+async function clearAllDbLogs() {
+    if (confirm('⚠️ Очистити ВСІ логи з БД?')) {
+        await fetch('/api/clear_logs', { method: 'POST' });
+        await loadDbLogs();
+        alert('✅ Всі логи очищено');
+    }
+}
+
+// ============= ФАЙЛОВІ ЛОГИ =============
+let fileLogAutoRefreshInterval = null;
+let currentFileLogs = [];
+
+async function loadLogFilesList() {
+    console.log('Завантаження списку файлів логів...');
+    try {
+        const response = await fetch('/api/logs_files_list');
+        const files = await response.json();
+        console.log('Отримано файли:', files);
+
+        const select = document.getElementById('fileLogSelect');
+        if (!select) {
+            console.error('select fileLogSelect не знайдено');
+            return;
+        }
+
+        if (!files || files.length === 0) {
+            select.innerHTML = '<option value="">📭 Файли логів не знайдено</option>';
+            const container = document.getElementById('fileLogsContainer');
+            if (container) {
+                container.innerHTML = '<div class="loading">⚠️ Файли логів не знайдено!<br><br>Переконайтеся що папка "logs" існує</div>';
+            }
+            return;
+        }
+
+        // Заповнюємо select
+        select.innerHTML = '';
+        files.forEach(f => {
+            const sizeKB = f.size;
+            const date = new Date(f.modified).toLocaleString();
+            select.innerHTML += `<option value="${f.name}">📄 ${f.name} (${sizeKB} KB, ${date})</option>`;
+        });
+
+        // Автоматично завантажуємо перший файл
+        if (files.length > 0) {
+            select.value = files[0].name;
+            await loadFileLogs();
+        }
+
+    } catch(e) {
+        console.error('Помилка отримання списку файлів:', e);
+        const select = document.getElementById('fileLogSelect');
+        if (select) {
+            select.innerHTML = '<option value="">❌ Помилка завантаження</option>';
+        }
+    }
+}
+
+async function loadFileLogs() {
+    const select = document.getElementById('fileLogSelect');
+    if (!select) {
+        console.error('select fileLogSelect не знайдено');
+        return;
+    }
+
+    const file = select.value;
+    if (!file) {
+        console.log('Файл не вибрано');
+        return;
+    }
+
+    const level = document.getElementById('fileLogLevelFilter')?.value || 'all';
+    const limit = document.getElementById('fileLogLimit')?.value || 100;
+    const sourceFilter = document.getElementById('fileLogSourceFilter')?.value || '';
+    const sortDesc = document.getElementById('fileLogSortDesc')?.checked ? 'desc' : 'asc';
+
+    console.log(`Завантаження файлу: ${file}, limit=${limit}, level=${level}, source=${sourceFilter}`);
+
+    try {
+        const response = await fetch(`/api/logs_file?file=${encodeURIComponent(file)}&limit=${limit}&level=${level}&source=${encodeURIComponent(sourceFilter)}&sort=${sortDesc}`);
+        const logs = await response.json();
+
+        console.log(`Отримано ${logs.length} записів з файлу ${file}`);
+        currentFileLogs = logs;
+
+        const container = document.getElementById('fileLogsContainer');
+        if (!container) {
+            console.error('Контейнер fileLogsContainer не знайдено');
+            return;
+        }
+
+        if (!logs || logs.length === 0) {
+            container.innerHTML = `<div class="loading">📭 Немає логів у файлі ${file}</div>`;
+            return;
+        }
+
+        const sortText = sortDesc === 'desc' ? 'новіші зверху' : 'старіші зверху';
+        let html = `<div style="padding: 8px 10px; background: #1a1a2e; border-radius: 8px; margin-bottom: 10px; font-size: 12px; color: #888;">
+            📊 Всього записів: ${logs.length} | Файл: ${file} | Сортування: ${sortText}
+            <button onclick="copyFileLogs()" style="float: right; background: #007bff; padding: 2px 8px; font-size: 11px;">📋 Копіювати</button>
+        </div>`;
+
+        html += '<div style="display: flex; flex-direction: column; gap: 2px; font-family: monospace; font-size: 11px;">';
+
+        for (const log of logs) {
+            let levelClass = 'log-info';
+            let levelIcon = '📘';
+            if (log.level === 'WARNING') { levelClass = 'log-warning'; levelIcon = '⚠️'; }
+            if (log.level === 'ERROR') { levelClass = 'log-error'; levelIcon = '❌'; }
+
+            html += `<div class="${levelClass}" style="padding: 6px 10px; border-bottom: 1px solid #2a2a4a;">
+                <span style="color: #888;">${log.timestamp}</span>
+                ${levelIcon} ${log.level}
+                <span style="color: #00d4ff;">[${log.source}]</span>
+                <span style="color: #e0e0e0;">${escapeHtml(log.message)}</span>
+            </div>`;
+        }
+
+        html += '</div>';
+        container.innerHTML = html;
+
+        // Прокручуємо до верху
+        container.scrollTop = 0;
+
+    } catch(e) {
+        console.error('Помилка завантаження файлових логів:', e);
+        const container = document.getElementById('fileLogsContainer');
+        if (container) {
+            container.innerHTML = '<div class="loading">❌ Помилка завантаження: ' + e.message + '</div>';
+        }
+    }
+}
+
+function copyFileLogs() {
+    if (!currentFileLogs || currentFileLogs.length === 0) {
+        alert('Немає даних для копіювання');
+        return;
+    }
+
+    let text = '';
+    for (const log of currentFileLogs) {
+        text += `${log.timestamp} [${log.level}] [${log.source}] ${log.message}\n`;
+    }
+
+    navigator.clipboard.writeText(text).then(() => {
+        alert(`✅ Скопійовано ${currentFileLogs.length} записів`);
+    }).catch(() => {
+        alert('❌ Помилка копіювання');
+    });
+}
+
+function toggleFileLogAutoRefresh() {
+    const autoRefresh = document.getElementById('fileLogAutoRefresh')?.checked;
+
+    if (fileLogAutoRefreshInterval) {
+        clearInterval(fileLogAutoRefreshInterval);
+        fileLogAutoRefreshInterval = null;
+    }
+
+    if (autoRefresh) {
+        fileLogAutoRefreshInterval = setInterval(() => {
+            loadFileLogs();
+        }, 3000);
+        console.log('Автооновлення файлових логів увімкнено (3с)');
+    } else {
+        console.log('Автооновлення вимкнено');
+    }
+}
+
+async function downloadFileLogs() {
+    const select = document.getElementById('fileLogSelect');
+    if (!select || !select.value) {
+        alert('Виберіть файл для скачування');
+        return;
+    }
+
+    const file = select.value;
+    window.open(`/api/logs_file/download?file=${encodeURIComponent(file)}`, '_blank');
+}
+
+async function refreshFileLogsList() {
+    await loadLogFilesList();
+}
+
+// Діагностика файлових логів
+async function testFileLogs() {
+    try {
+        // 1. Перевіряємо список файлів
+        const listResponse = await fetch('/api/logs_files_list');
+        const files = await listResponse.json();
+        console.log('Доступні файли:', files);
+
+        if (!files || files.length === 0) {
+            alert('❌ Не знайдено жодного файлу логів!\n\nПеревірте чи існує папка "logs"');
+            return;
+        }
+
+        // 2. Перевіряємо перший файл
+        const firstFile = files[0].name;
+        const fileResponse = await fetch(`/api/logs_file?file=${encodeURIComponent(firstFile)}&limit=5`);
+        const logs = await fileResponse.json();
+
+        alert(`✅ Знайдено ${files.length} файлів логів\n\n📄 ${firstFile}: ${logs.length} записів\n\nПерший запис: ${logs[0]?.message || 'немає'}`);
+
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка: ' + e.message);
+    }
+}
 
         // ============= ГРАФІК УГОДИ =============
         let _tradeState = {
