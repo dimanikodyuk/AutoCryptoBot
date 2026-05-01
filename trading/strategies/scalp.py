@@ -26,6 +26,7 @@ class ScalpStrategy(BaseStrategy):
 
         self.symbols = saved_settings.get('symbols', ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
         self.enabled = saved_settings.get('enabled', False)
+        self.last_trade_time: Dict[str, datetime] = {}
 
         # Параметри торгівлі
         self.trade_size_usdt = saved_settings.get('trade_size_usdt', 20)
@@ -653,36 +654,69 @@ class ScalpStrategy(BaseStrategy):
             return {'action': 'hold', 'blocked': True, 'reason': self._block_reason}
 
         signals_generated = []
+        current_time = datetime.now()
 
         for symbol in self.symbols:
             try:
                 # Пропускаємо якщо позиція вже відкривається або закривається
                 if symbol in self._opening_positions or symbol in self._closing_positions:
+                    logger.debug(f"[{symbol}] Вже обробляється, пропускаємо")
                     continue
 
+                # ============ НОВА ПЕРЕВІРКА: Час з останньої угоди ============
+                last_trade_time = self.last_trade_time.get(symbol)
+                if last_trade_time:
+                    seconds_since_last = (current_time - last_trade_time).total_seconds()
+                    if seconds_since_last < 60:  # Мінімум 60 секунд між угодами
+                        logger.debug(f"[{symbol}] Зачекайте {60 - seconds_since_last:.0f}с перед наступною угодою")
+                        continue
+
+                # ============ ПЕРЕВІРКА ВІДКРИТОЇ ПОЗИЦІЇ ============
+                if symbol in self.open_positions:
+                    logger.debug(f"[{symbol}] Вже є відкрита позиція, пропускаємо відкриття нової")
+                    # Перевіряємо чи пора закривати існуючу позицію
+                    position = self.open_positions[symbol]
+                    current_price = self.current_prices.get(symbol, position['entry_price'])
+                    exit_signal = await self.check_exit_signals(symbol, position, current_price)
+                    if exit_signal != 'hold':
+                        await self._close_position(symbol, exit_signal, current_price)
+                    continue
+
+                # Отримуємо індикатори
                 indicators = await self.get_indicators(symbol)
                 if not indicators:
                     continue
 
                 price = indicators['price']
+                self.current_prices[symbol] = price
 
-                if symbol in self.open_positions:
-                    exit_signal = await self.check_exit_signals(symbol, self.open_positions[symbol], price)
-                    if exit_signal != 'hold':
-                        await self._close_position(symbol, exit_signal, price)
+                # ============ ПЕРЕВІРКА БАЛАНСУ ============
+                if self.available_balance < self.trade_size_usdt:
+                    logger.debug(
+                        f"[{symbol}] Недостатньо балансу: ${self.available_balance:.2f} < ${self.trade_size_usdt}")
+                    continue
+
+                # ============ Логування сигналів для діагностики ============
+                buy_signals_count = len(indicators.get('buy_signals', []))
+                sell_signals_count = len(indicators.get('sell_signals', []))
+                strong_buy = indicators.get('strong_buy', False)
+                buy_signal = indicators.get('buy_signal', False)
+
+                # ============ ВІДКРИТТЯ ПОЗИЦІЇ ТІЛЬКИ ПРИ STRONG_BUY ============
+                # Змінюємо умову: тільки сильний сигнал, і не частіше ніж раз на 2 хвилини
+                if strong_buy and buy_signal and symbol not in self.open_positions:
+                    logger.info(f"[{symbol}] 🔥 СИЛЬНИЙ СИГНАЛ НА ПОКУПКУ! (сигналів: {buy_signals_count})")
+                    signals_generated.append(f"{symbol}: STRONG_BUY")
+                    await self._open_position(symbol, price, strong=True)
+                elif buy_signal and buy_signals_count >= 3 and symbol not in self.open_positions:
+                    # Звичайний сигнал тільки якщо хоча б 3 індикатори збігаються
+                    logger.info(f"[{symbol}] ✅ Сигнал на покупку! ({buy_signals_count} індикаторів)")
+                    signals_generated.append(f"{symbol}: BUY")
+                    await self._open_position(symbol, price, strong=False)
                 else:
-                    # Перевіряємо чи є вільний баланс
-                    if self.available_balance < self.trade_size_usdt:
-                        continue
-
-                    if indicators['strong_buy']:
-                        logger.info(f"[{symbol}] 🔥 СИЛЬНИЙ СИГНАЛ НА ПОКУПКУ!")
-                        signals_generated.append(f"{symbol}: STRONG_BUY")
-                        await self._open_position(symbol, price, strong=True)
-                    elif indicators['buy_signal']:
-                        logger.info(f"[{symbol}] ✅ Сигнал на покупку!")
-                        signals_generated.append(f"{symbol}: BUY")
-                        await self._open_position(symbol, price, strong=False)
+                    if buy_signals_count > 0:
+                        logger.debug(
+                            f"[{symbol}] Сигнал занадто слабкий: {buy_signals_count} індикаторів, strong_buy={strong_buy}")
 
             except Exception as e:
                 logger.error(f"Помилка аналізу {symbol}: {e}")
@@ -779,6 +813,8 @@ class ScalpStrategy(BaseStrategy):
             }
 
             self.locked_balance += cost
+            # ============ ЗАПАМ'ЯТОВУЄМО ЧАС ОСТАННЬОЇ УГОДИ ============
+            self.last_trade_time[symbol] = datetime.now()
 
             # Зберігаємо ордер в БД
             self._save_order(order_id, symbol, 'buy', current_price, quantity, 'open', stop_loss_price,
