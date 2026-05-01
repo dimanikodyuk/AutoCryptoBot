@@ -2217,42 +2217,46 @@ async function updateScalpPnL() {
         };
 
         async function showTradeChart(orderId, symbol, side, price, quantity, pnl, timestamp) {
-            const modal = document.getElementById('tradeModal');
-            if (!modal) return;
-            modal.style.display = 'block';
+    const modal = document.getElementById('tradeModal');
+    if (!modal) return;
+    modal.style.display = 'block';
 
-            _tradeState.orderId = orderId;
-            _tradeState.symbol = symbol;
-            _tradeState.side = side;
-            _tradeState.tf = '1';
-            _tradeState.klineCache = {};
+    _tradeState.orderId = orderId;
+    _tradeState.symbol = symbol;
+    _tradeState.side = side;  // ← Додаємо сторону угоди
+    _tradeState.tf = '1';
+    _tradeState.klineCache = {};
 
-            const pnlVal = parseFloat(pnl || 0);
-            const badge = document.getElementById('tradeModalBadge');
-            if (badge) {
-                badge.textContent = side === 'buy' ? '📈 КУПІВЛЯ' : '📉 ПРОДАЖ';
-                badge.style.background = side === 'buy' ? '#00ff8822' : '#ff444422';
-                badge.style.color = side === 'buy' ? '#00ff88' : '#ff4444';
-            }
-            const titleEl = document.getElementById('tradeModalTitle');
-            if (titleEl) titleEl.textContent = `📊 ${symbol}`;
-            const infoEl = document.getElementById('tradeInfo');
-            if (infoEl) {
-                infoEl.innerHTML = `
-                    <div class="trade-info-item"><div class="trade-info-label">Ордер ID</div><div class="trade-info-value" style="font-size:11px;">${String(orderId).substring(0,22)}…</div></div>
-                    <div class="trade-info-item"><div class="trade-info-label">Ціна входу</div><div class="trade-info-value">$${parseFloat(price).toFixed(2)}</div></div>
-                    <div class="trade-info-item"><div class="trade-info-label">Кількість</div><div class="trade-info-value">${parseFloat(quantity).toFixed(6)}</div></div>
-                    <div class="trade-info-item"><div class="trade-info-label">PnL</div><div class="trade-info-value ${pnlVal>=0?'buy':'sell'}" style="font-size:20px;font-weight:bold;">$${pnlVal.toFixed(2)}</div></div>
-                    <div class="trade-info-item"><div class="trade-info-label">Час відкриття</div><div class="trade-info-value">${new Date(timestamp).toLocaleString()}</div></div>
-                `;
-            }
-            document.querySelectorAll('.tf-btn[id^="tf_trade_"]').forEach(b => b.classList.remove('tf-active'));
-            const tfBtn = document.getElementById('tf_trade_1');
-            if (tfBtn) tfBtn.classList.add('tf-active');
-            const chartContainer = document.getElementById('tradeChartContainer');
-            if (chartContainer) chartContainer.innerHTML = '<div class="loading-chart">⏳ Завантаження свічок...</div>';
-            await _loadAndDrawTradeChart();
-        }
+    const pnlVal = parseFloat(pnl || 0);
+    const badge = document.getElementById('tradeModalBadge');
+    if (badge) {
+        badge.textContent = side === 'buy' ? '📈 LONG (КУПІВЛЯ)' : '📉 SHORT (ПРОДАЖ)';
+        badge.style.background = side === 'buy' ? '#00ff8822' : '#ff444422';
+        badge.style.color = side === 'buy' ? '#00ff88' : '#ff4444';
+    }
+    const titleEl = document.getElementById('tradeModalTitle');
+    if (titleEl) titleEl.textContent = `📊 ${symbol} - ${side === 'buy' ? 'LONG' : 'SHORT'}`;
+
+    const infoEl = document.getElementById('tradeInfo');
+    if (infoEl) {
+        infoEl.innerHTML = `
+            <div class="trade-info-item"><div class="trade-info-label">Ордер ID</div><div class="trade-info-value" style="font-size:11px;">${String(orderId).substring(0,22)}…</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">Тип угоди</div><div class="trade-info-value ${side === 'buy' ? 'buy' : 'sell'}">${side === 'buy' ? '🟢 LONG' : '🔴 SHORT'}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">Ціна входу</div><div class="trade-info-value">$${parseFloat(price).toFixed(2)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">Кількість</div><div class="trade-info-value">${parseFloat(quantity).toFixed(6)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">PnL</div><div class="trade-info-value ${pnlVal>=0?'buy':'sell'}" style="font-size:20px;font-weight:bold;">${pnlVal>=0?'+':''}$${pnlVal.toFixed(2)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">Час відкриття</div><div class="trade-info-value">${new Date(timestamp).toLocaleString()}</div></div>
+        `;
+    }
+
+    document.querySelectorAll('.tf-btn[id^="tf_trade_"]').forEach(b => b.classList.remove('tf-active'));
+    const tfBtn = document.getElementById('tf_trade_1');
+    if (tfBtn) tfBtn.classList.add('tf-active');
+
+    const chartContainer = document.getElementById('tradeChartContainer');
+    if (chartContainer) chartContainer.innerHTML = '<div class="loading-chart">⏳ Завантаження свічок...</div>';
+    await _loadAndDrawTradeChart();
+}
 
         async function _loadAndDrawTradeChart() {
             const { orderId, symbol, tf } = _tradeState;
@@ -2318,117 +2322,190 @@ async function updateScalpPnL() {
         }
 
         function _drawTradeChart(data) {
-            const { chartType, indicators, entryPrice, entryDate, exitPrice, exitDate, symbol } = _tradeState;
-            const klines = data.klines;
-            if (!klines || klines.length === 0) return;
-            klines.sort((a, b) => a.timestamp - b.timestamp);
-            const dates = klines.map(k => new Date(k.time_iso + 'Z'));
-            const opens = klines.map(k => parseFloat(k.open));
-            const highs = klines.map(k => parseFloat(k.high));
-            const lows = klines.map(k => parseFloat(k.low));
-            const closes = klines.map(k => parseFloat(k.close));
-            const vols = klines.map(k => parseFloat(k.volume));
-            const traces = [];
+    const { chartType, indicators, entryPrice, entryDate, exitPrice, exitDate, symbol, side } = _tradeState;
+    const klines = data.klines;
+    if (!klines || klines.length === 0) return;
 
-            if (chartType === 'candle') {
-                traces.push({ type: 'candlestick', x: dates, open: opens, high: highs, low: lows, close: closes, name: 'Ціна', increasing: { line: { color: '#00ff88', width: 1 }, fillcolor: '#00ff8844' }, decreasing: { line: { color: '#ff4444', width: 1 }, fillcolor: '#ff444444' }, whiskerwidth: 0.8, hoverinfo: 'x+y', yaxis: 'y' });
-            } else {
-                traces.push({ type: 'scatter', mode: 'lines', x: dates, y: closes, name: 'Ціна', line: { color: '#00d4ff', width: 2 }, yaxis: 'y' });
+    klines.sort((a, b) => a.timestamp - b.timestamp);
+    const dates = klines.map(k => new Date(k.time_iso + 'Z'));
+    const opens = klines.map(k => parseFloat(k.open));
+    const highs = klines.map(k => parseFloat(k.high));
+    const lows = klines.map(k => parseFloat(k.low));
+    const closes = klines.map(k => parseFloat(k.close));
+    const vols = klines.map(k => parseFloat(k.volume));
+    const traces = [];
+
+    // Основний графік (свічки або лінія)
+    if (chartType === 'candle') {
+        traces.push({ type: 'candlestick', x: dates, open: opens, high: highs, low: lows, close: closes,
+                      name: 'Ціна', increasing: { line: { color: '#00ff88', width: 1 }, fillcolor: '#00ff8844' },
+                      decreasing: { line: { color: '#ff4444', width: 1 }, fillcolor: '#ff444444' },
+                      whiskerwidth: 0.8, hoverinfo: 'x+y', yaxis: 'y' });
+    } else {
+        traces.push({ type: 'scatter', mode: 'lines', x: dates, y: closes, name: 'Ціна',
+                      line: { color: '#00d4ff', width: 2 }, yaxis: 'y' });
+    }
+
+    // EMA індикатори
+    if (indicators.ema) {
+        const ema9 = _calcEMA(closes, 9);
+        const ema21 = _calcEMA(closes, 21);
+        traces.push({ type: 'scatter', mode: 'lines', x: dates, y: ema9, name: 'EMA 9',
+                      line: { color: '#ffaa00', width: 1.5, dash: 'solid' }, yaxis: 'y', hoverinfo: 'skip' });
+        traces.push({ type: 'scatter', mode: 'lines', x: dates, y: ema21, name: 'EMA 21',
+                      line: { color: '#aa88ff', width: 1.5, dash: 'solid' }, yaxis: 'y', hoverinfo: 'skip' });
+    }
+
+    // Bollinger Bands
+    if (indicators.bb) {
+        const bb = _calcBB(closes, 20, 2);
+        traces.push({ type: 'scatter', mode: 'lines', x: dates, y: bb.upper, name: 'BB Верх',
+                      line: { color: '#00d4ff55', width: 1, dash: 'dot' }, yaxis: 'y', hoverinfo: 'skip', showlegend: false });
+        traces.push({ type: 'scatter', mode: 'lines', x: dates, y: bb.middle, name: 'BB Середня',
+                      line: { color: '#00d4ff88', width: 1 }, yaxis: 'y', hoverinfo: 'skip', showlegend: false });
+        traces.push({ type: 'scatter', mode: 'lines', x: dates, y: bb.lower, name: 'BB',
+                      line: { color: '#00d4ff55', width: 1, dash: 'dot' }, fill: 'tonexty',
+                      fillcolor: 'rgba(0,212,255,0.04)', yaxis: 'y', hoverinfo: 'skip' });
+    }
+
+    // Об'єм
+    if (indicators.vol) {
+        const volColors = closes.map((c, i) => i > 0 ? (c >= opens[i] ? 'rgba(0,255,136,0.5)' : 'rgba(255,68,68,0.5)') : 'rgba(0,212,255,0.5)');
+        traces.push({ type: 'bar', x: dates, y: vols, name: 'Об\'єм', marker: { color: volColors },
+                      yaxis: 'y2', hovertemplate: '%{y:.0f}<extra>VOL</extra>' });
+    }
+
+    // Точка входу
+    if (entryDate && entryPrice) {
+        // Визначаємо колір залежно від сторони угоди
+        const entryColor = side === 'buy' ? '#00ff88' : '#ff4444';
+        const entrySymbol = side === 'buy' ? '▲' : '▼';
+        const entryText = side === 'buy' ? '🟢 ВХІД LONG' : '🔴 ВХІД SHORT';
+
+        traces.push({ type: 'scatter', mode: 'markers+text', x: [entryDate], y: [entryPrice],
+                      name: entryText, marker: { color: entryColor, size: 16, symbol: 'triangle-up',
+                      line: { color: '#fff', width: 2 } },
+                      text: [`  ВХІД $${entryPrice.toFixed(2)}`], textposition: 'middle right',
+                      textfont: { color: entryColor, size: 12, family: 'Arial Black' },
+                      yaxis: 'y', hovertemplate: `${entryText}<br>${entryDate.toLocaleString()}<br>$${entryPrice.toFixed(2)}<extra></extra>` });
+    }
+
+    // Точка виходу
+    if (exitDate && exitPrice) {
+        const pnlPct = ((exitPrice - entryPrice) / entryPrice * 100).toFixed(2);
+        const pnlPos = parseFloat(pnlPct) >= 0;
+        const exitColor = pnlPos ? '#ff8800' : '#ff4444';
+        traces.push({ type: 'scatter', mode: 'markers+text', x: [exitDate], y: [exitPrice],
+                      name: '🔴 ВИХІД', marker: { color: exitColor, size: 16, symbol: 'triangle-down',
+                      line: { color: '#fff', width: 2 } },
+                      text: [`  ВИХІД $${exitPrice.toFixed(2)}`], textposition: 'middle right',
+                      textfont: { color: exitColor, size: 12, family: 'Arial Black' },
+                      yaxis: 'y', hovertemplate: `🔴 ВИХІД<br>${exitDate.toLocaleString()}<br>$${exitPrice.toFixed(2)}<extra></extra>` });
+
+        // Лінія PnL між точками
+        traces.push({ type: 'scatter', mode: 'lines', x: [entryDate, exitDate], y: [entryPrice, exitPrice],
+                      name: `${pnlPos ? '✅' : '❌'} PnL ${pnlPct}%`,
+                      line: { color: pnlPos ? '#00ff8888' : '#ff444488', width: 2, dash: 'dash' },
+                      yaxis: 'y', hoverinfo: 'skip' });
+
+        // Текст PnL посередині
+        const midDate = new Date((entryDate.getTime() + exitDate.getTime()) / 2);
+        const midPrice = (entryPrice + exitPrice) / 2;
+        traces.push({ type: 'scatter', mode: 'text', x: [midDate], y: [midPrice],
+                      text: [`${pnlPos ? '▲' : '▼'} ${pnlPct}%`],
+                      textfont: { color: pnlPos ? '#00ff88' : '#ff4444', size: 14, family: 'Arial Black' },
+                      yaxis: 'y', showlegend: false, hoverinfo: 'skip' });
+    }
+
+    // Розрахунок діапазону для осі Y (додаємо відступи)
+    const allPrices = [...closes, ...highs, ...lows];
+    if (entryPrice) allPrices.push(entryPrice);
+    if (exitPrice) allPrices.push(exitPrice);
+    const minP = Math.min(...allPrices);
+    const maxP = Math.max(...allPrices);
+    const pad = (maxP - minP) * 0.08 || maxP * 0.005;
+
+    const allDates = [...dates];
+    if (entryDate) allDates.push(entryDate);
+    if (exitDate) allDates.push(exitDate);
+    const minD = new Date(Math.min(...allDates) - 2 * 60000);
+    const maxD = new Date(Math.max(...allDates) + 2 * 60000);
+
+    const hasVol = indicators.vol;
+    const yDomain = hasVol ? [0.22, 1] : [0, 1];
+    const y2Domain = hasVol ? [0, 0.18] : [0, 0];
+
+    const shapes = [];
+
+    // Додаємо горизонтальну лінію для ціни входу (пунктирна)
+    if (entryPrice) {
+        shapes.push({
+            type: 'line', x0: 0, x1: 1, xref: 'paper',
+            y0: entryPrice, y1: entryPrice, yref: 'y',
+            line: { color: side === 'buy' ? '#00ff8866' : '#ff444466', width: 1.5, dash: 'dash' }
+        });
+    }
+
+    const layout = {
+        paper_bgcolor: '#0f0f1a', plot_bgcolor: '#0f0f1a', font: { color: '#e0e0e0', size: 11 },
+        margin: { l: 65, r: 65, t: 30, b: 50 }, height: 480, hovermode: 'x unified',
+        hoverlabel: { bgcolor: '#1a1a2e', bordercolor: '#2a2a4a', font: { color: '#e0e0e0', size: 11 } },
+        dragmode: 'zoom',
+        xaxis: { type: 'date', range: [minD, maxD], gridcolor: '#1e1e32', tickformat: '%H:%M\n%d.%m', color: '#888',
+                 rangeslider: { visible: false }, domain: [0, 1] },
+        yaxis: { title: `${symbol} (USDT)`, gridcolor: '#1e1e32', range: [minP - pad, maxP + pad],
+                 color: '#888', tickprefix: '$', side: 'right', domain: yDomain, fixedrange: false },
+        yaxis2: hasVol ? { gridcolor: '#1e1e32', color: '#888', domain: y2Domain, fixedrange: true, showticklabels: false }
+                       : { overlaying: 'y', visible: false },
+        legend: { bgcolor: 'rgba(15,15,26,0.9)', bordercolor: '#2a2a4a', borderwidth: 1, x: 0.01, y: 0.99, font: { size: 11 } },
+        shapes: shapes
+    };
+
+    const chartContainer = document.getElementById('tradeChartContainer');
+    if (!chartContainer) return;
+    chartContainer.innerHTML = '<div id="tradeChart" style="width:100%;height:480px;"></div>';
+    const chartDiv = document.getElementById('tradeChart');
+    if (!chartDiv) return;
+
+    Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: true,
+        modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d', 'hoverClosestCartesian', 'hoverCompareCartesian'],
+        modeBarButtonsToAdd: [], displaylogo: false });
+
+    // RSI графік (якщо включений)
+    const rsiContainer = document.getElementById('tradeRsiContainer');
+    if (indicators.rsi && rsiContainer) {
+        const rsiValues = _calcRSI(closes, 14);
+        const rsiTraces = [
+            { type: 'scatter', mode: 'lines', x: dates, y: rsiValues, name: 'RSI',
+              line: { color: '#00d4ff', width: 1.5 }, hovertemplate: 'RSI: %{y:.1f}<extra></extra>' },
+            { type: 'scatter', mode: 'lines', x: [dates[0], dates[dates.length-1]], y: [70, 70],
+              name: 'OB', line: { color: '#ff444466', width: 1, dash: 'dot' }, hoverinfo: 'skip', showlegend: false },
+            { type: 'scatter', mode: 'lines', x: [dates[0], dates[dates.length-1]], y: [30, 30],
+              name: 'OS', line: { color: '#00ff8866', width: 1, dash: 'dot' }, hoverinfo: 'skip', showlegend: false }
+        ];
+        const rsiLayout = {
+            paper_bgcolor: '#0f0f1a', plot_bgcolor: '#0f0f1a', margin: { l: 65, r: 65, t: 5, b: 40 }, height: 120,
+            xaxis: { type: 'date', range: [minD, maxD], gridcolor: '#1e1e32', tickformat: '%H:%M', color: '#888', rangeslider: { visible: false } },
+            yaxis: { range: [0, 100], gridcolor: '#1e1e32', color: '#888', side: 'right', tickvals: [30, 50, 70], fixedrange: true },
+            legend: { visible: false }, showlegend: false, font: { color: '#888', size: 10 }
+        };
+        rsiContainer.style.display = 'block';
+        const rsiChartDiv = document.getElementById('tradeRsiChart');
+        if (rsiChartDiv) Plotly.newPlot('tradeRsiChart', rsiTraces, rsiLayout, { responsive: true, displayModeBar: false });
+
+        // Синхронізація масштабу
+        chartDiv.on('plotly_relayout', (eventData) => {
+            if (eventData['xaxis.range[0]'] !== undefined) {
+                Plotly.relayout('tradeRsiChart', {
+                    'xaxis.range[0]': eventData['xaxis.range[0]'],
+                    'xaxis.range[1]': eventData['xaxis.range[1]']
+                });
             }
-
-            if (indicators.ema) {
-                const ema9 = _calcEMA(closes, 9);
-                const ema21 = _calcEMA(closes, 21);
-                traces.push({ type: 'scatter', mode: 'lines', x: dates, y: ema9, name: 'EMA 9', line: { color: '#ffaa00', width: 1.5, dash: 'solid' }, yaxis: 'y', hoverinfo: 'skip' });
-                traces.push({ type: 'scatter', mode: 'lines', x: dates, y: ema21, name: 'EMA 21', line: { color: '#aa88ff', width: 1.5, dash: 'solid' }, yaxis: 'y', hoverinfo: 'skip' });
-            }
-
-            if (indicators.bb) {
-                const bb = _calcBB(closes, 20, 2);
-                traces.push({ type: 'scatter', mode: 'lines', x: dates, y: bb.upper, name: 'BB Верх', line: { color: '#00d4ff55', width: 1, dash: 'dot' }, yaxis: 'y', hoverinfo: 'skip', showlegend: false });
-                traces.push({ type: 'scatter', mode: 'lines', x: dates, y: bb.middle, name: 'BB Середня', line: { color: '#00d4ff88', width: 1 }, yaxis: 'y', hoverinfo: 'skip', showlegend: false });
-                traces.push({ type: 'scatter', mode: 'lines', x: dates, y: bb.lower, name: 'BB', line: { color: '#00d4ff55', width: 1, dash: 'dot' }, fill: 'tonexty', fillcolor: 'rgba(0,212,255,0.04)', yaxis: 'y', hoverinfo: 'skip' });
-            }
-
-            if (indicators.vol) {
-                const volColors = closes.map((c, i) => i > 0 ? (c >= opens[i] ? 'rgba(0,255,136,0.5)' : 'rgba(255,68,68,0.5)') : 'rgba(0,212,255,0.5)');
-                traces.push({ type: 'bar', x: dates, y: vols, name: 'Об\'єм', marker: { color: volColors }, yaxis: 'y2', hovertemplate: '%{y:.0f}<extra>VOL</extra>' });
-            }
-
-            if (entryDate && entryPrice) {
-                traces.push({ type: 'scatter', mode: 'markers+text', x: [entryDate], y: [entryPrice], name: '🟢 ВХІД', marker: { color: '#00ff88', size: 16, symbol: 'triangle-up', line: { color: '#fff', width: 2 } }, text: [`  ВХІД $${entryPrice.toFixed(2)}`], textposition: 'middle right', textfont: { color: '#00ff88', size: 12, family: 'Arial Black' }, yaxis: 'y', hovertemplate: `🟢 ВХІД<br>${entryDate.toLocaleString()}<br>$${entryPrice.toFixed(2)}<extra></extra>` });
-            }
-
-            if (exitDate && exitPrice) {
-                const pnlPct = ((exitPrice - entryPrice) / entryPrice * 100).toFixed(2);
-                const pnlPos = parseFloat(pnlPct) >= 0;
-                const exitColor = pnlPos ? '#ff8800' : '#ff4444';
-                traces.push({ type: 'scatter', mode: 'markers+text', x: [exitDate], y: [exitPrice], name: '🔴 ВИХІД', marker: { color: exitColor, size: 16, symbol: 'triangle-down', line: { color: '#fff', width: 2 } }, text: [`  ВИХІД $${exitPrice.toFixed(2)}`], textposition: 'middle right', textfont: { color: exitColor, size: 12, family: 'Arial Black' }, yaxis: 'y', hovertemplate: `🔴 ВИХІД<br>${exitDate.toLocaleString()}<br>$${exitPrice.toFixed(2)}<extra></extra>` });
-                traces.push({ type: 'scatter', mode: 'lines', x: [entryDate, exitDate], y: [entryPrice, exitPrice], name: `${pnlPos ? '✅' : '❌'} PnL ${pnlPct}%`, line: { color: pnlPos ? '#00ff8888' : '#ff444488', width: 2, dash: 'dash' }, yaxis: 'y', hoverinfo: 'skip' });
-                const midDate = new Date((entryDate.getTime() + exitDate.getTime()) / 2);
-                const midPrice = (entryPrice + exitPrice) / 2;
-                traces.push({ type: 'scatter', mode: 'text', x: [midDate], y: [midPrice], text: [`${pnlPos ? '▲' : '▼'} ${pnlPct}%`], textfont: { color: pnlPos ? '#00ff88' : '#ff4444', size: 14, family: 'Arial Black' }, yaxis: 'y', showlegend: false, hoverinfo: 'skip' });
-            }
-
-            const shapes = [], annotations = [];
-            if (entryPrice) {
-                const slPrice = _tradeState.stopLoss || entryPrice * 0.9975;
-                const tpPrice = _tradeState.takeProfit || entryPrice * 1.005;
-                shapes.push({ type:'line', x0:0, x1:1, xref:'paper', y0:tpPrice, y1:tpPrice, yref:'y', line:{color:'#00ff8866', width:1, dash:'dot'} });
-                shapes.push({ type:'line', x0:0, x1:1, xref:'paper', y0:slPrice, y1:slPrice, yref:'y', line:{color:'#ff444466', width:1, dash:'dot'} });
-                annotations.push({ x:1, xref:'paper', y:tpPrice, yref:'y', text:`TP $${tpPrice.toFixed(2)}`, showarrow:false, xanchor:'right', font:{color:'#00ff88',size:10} });
-                annotations.push({ x:1, xref:'paper', y:slPrice, yref:'y', text:`SL $${slPrice.toFixed(2)}`, showarrow:false, xanchor:'right', font:{color:'#ff4444',size:10} });
-            }
-
-            const allPrices = [...closes, ...highs, ...lows];
-            if (entryPrice) allPrices.push(entryPrice);
-            if (exitPrice) allPrices.push(exitPrice);
-            const minP = Math.min(...allPrices), maxP = Math.max(...allPrices);
-            const pad = (maxP - minP) * 0.06 || maxP * 0.002;
-            const allDates = [...dates];
-            if (entryDate) allDates.push(entryDate);
-            if (exitDate) allDates.push(exitDate);
-            const minD = new Date(Math.min(...allDates) - 2 * 60000);
-            const maxD = new Date(Math.max(...allDates) + 2 * 60000);
-            const hasVol = indicators.vol;
-            const yDomain = hasVol ? [0.22, 1] : [0, 1];
-            const y2Domain = hasVol ? [0, 0.18] : [0, 0];
-            const layout = {
-                paper_bgcolor: '#0f0f1a', plot_bgcolor: '#0f0f1a', font: { color: '#e0e0e0', size: 11 },
-                margin: { l: 65, r: 65, t: 30, b: 50 }, height: 480, hovermode: 'x unified',
-                hoverlabel: { bgcolor: '#1a1a2e', bordercolor: '#2a2a4a', font: { color: '#e0e0e0', size: 11 } },
-                dragmode: 'zoom', xaxis: { type: 'date', range: [minD, maxD], gridcolor: '#1e1e32', tickformat: '%H:%M\n%d.%m', color: '#888', rangeslider: { visible: false }, domain: [0, 1] },
-                yaxis: { title: `${symbol} (USDT)`, gridcolor: '#1e1e32', range: [minP - pad, maxP + pad], color: '#888', tickprefix: '$', side: 'right', domain: yDomain, fixedrange: false },
-                yaxis2: hasVol ? { gridcolor: '#1e1e32', color: '#888', domain: y2Domain, fixedrange: true, showticklabels: false } : { overlaying: 'y', visible: false },
-                legend: { bgcolor: 'rgba(15,15,26,0.9)', bordercolor: '#2a2a4a', borderwidth: 1, x: 0.01, y: 0.99, font: { size: 11 } },
-                shapes, annotations
-            };
-            const chartContainer = document.getElementById('tradeChartContainer');
-            if (!chartContainer) return;
-            chartContainer.innerHTML = '<div id="tradeChart" style="width:100%;height:480px;"></div>';
-            const chartDiv = document.getElementById('tradeChart');
-            if (!chartDiv) return;
-            Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: true, modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d', 'hoverClosestCartesian', 'hoverCompareCartesian'], modeBarButtonsToAdd: [], displaylogo: false });
-            const rsiContainer = document.getElementById('tradeRsiContainer');
-            if (indicators.rsi && rsiContainer) {
-                const rsiValues = _calcRSI(closes, 14);
-                const rsiTraces = [
-                    { type: 'scatter', mode: 'lines', x: dates, y: rsiValues, name: 'RSI', line: { color: '#00d4ff', width: 1.5 }, hovertemplate: 'RSI: %{y:.1f}<extra></extra>' },
-                    { type: 'scatter', mode: 'lines', x: [dates[0], dates[dates.length-1]], y: [70, 70], name: 'OB', line: { color: '#ff444466', width: 1, dash: 'dot' }, hoverinfo: 'skip', showlegend: false },
-                    { type: 'scatter', mode: 'lines', x: [dates[0], dates[dates.length-1]], y: [30, 30], name: 'OS', line: { color: '#00ff8866', width: 1, dash: 'dot' }, hoverinfo: 'skip', showlegend: false }
-                ];
-                const rsiLayout = {
-                    paper_bgcolor: '#0f0f1a', plot_bgcolor: '#0f0f1a', margin: { l: 65, r: 65, t: 5, b: 40 }, height: 120,
-                    xaxis: { type: 'date', range: [minD, maxD], gridcolor: '#1e1e32', tickformat: '%H:%M', color: '#888', rangeslider: { visible: false } },
-                    yaxis: { range: [0, 100], gridcolor: '#1e1e32', color: '#888', side: 'right', tickvals: [30, 50, 70], fixedrange: true },
-                    legend: { visible: false }, showlegend: false, font: { color: '#888', size: 10 }
-                };
-                rsiContainer.style.display = 'block';
-                const rsiChartDiv = document.getElementById('tradeRsiChart');
-                if (rsiChartDiv) Plotly.newPlot('tradeRsiChart', rsiTraces, rsiLayout, { responsive: true, displayModeBar: false });
-                chartDiv.on('plotly_relayout', (eventData) => { if (eventData['xaxis.range[0]'] !== undefined) { Plotly.relayout('tradeRsiChart', { 'xaxis.range[0]': eventData['xaxis.range[0]'], 'xaxis.range[1]': eventData['xaxis.range[1]'] }); } });
-            } else if (rsiContainer) { rsiContainer.style.display = 'none'; }
-        }
+        });
+    } else if (rsiContainer) {
+        rsiContainer.style.display = 'none';
+    }
+}
 
         async function changeTradeTf(tf) { _tradeState.tf = tf; document.querySelectorAll('.tf-btn[id^="tf_trade_"]').forEach(b => b.classList.remove('tf-active')); const btn = document.getElementById(`tf_trade_${tf}`); if (btn) btn.classList.add('tf-active'); await _loadAndDrawTradeChart(); }
         function changeTradeChartType(type) { _tradeState.chartType = type; document.getElementById('ct_candle')?.classList.toggle('tf-active', type === 'candle'); document.getElementById('ct_line')?.classList.toggle('tf-active', type === 'line'); if (_tradeState.klineCache[_tradeState.tf]) _drawTradeChart(_tradeState.klineCache[_tradeState.tf]); }

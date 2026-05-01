@@ -153,7 +153,7 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/trade_chart/<order_id>')
     @async_route
     async def api_trade_chart(order_id):
-        """Отримання даних для графіка угоди - ВИПРАВЛЕНО"""
+        """Отримання даних для графіка угоди - ВИПРАВЛЕНО для TECH ANALYSIS"""
         try:
             logger.info(f"Запит графіка для ордера: {order_id}")
 
@@ -176,6 +176,7 @@ def create_flask_app(config, trading_engine):
                 strategy_name = order_dict.get('strategy_name', 'unknown')
                 is_tech_analysis = strategy_name == 'tech_analysis'
                 symbol = order_dict['symbol']
+                order_side = order_dict.get('side', 'buy')
 
                 col_info = conn.execute("PRAGMA table_info(orders)").fetchall()
                 has_closed_price = any(c[1] == 'closed_price' for c in col_info)
@@ -186,9 +187,6 @@ def create_flask_app(config, trading_engine):
                 valid_tfs = {'1', '3', '5', '15', '30', '60', '120', '240', 'D'}
                 if tf_param not in valid_tfs:
                     tf_param = '15'
-
-                # Встановлюємо кількість свічок для показу
-                CANDLES_TO_SHOW = 300
 
                 # Якщо є збережені свічки - використовуємо їх
                 if saved_klines and len(saved_klines) > 0:
@@ -221,12 +219,14 @@ def create_flask_app(config, trading_engine):
                                 'quantity': float(order_dict['quantity'])
                             }
 
+                    # Додаємо інформацію про сторону угоди для фронтенду
                     return jsonify({
                         'order': order_dict,
                         'entry_point': entry_point,
                         'exit_point': exit_point,
                         'klines': saved_klines,
                         'symbol': symbol,
+                        'side': order_side,
                         'from_db': True
                     })
 
@@ -265,8 +265,13 @@ def create_flask_app(config, trading_engine):
                 # ============= ОСНОВНЕ ВИПРАВЛЕННЯ: завжди показуємо достатньо свічок =============
                 from datetime import datetime, timezone, timedelta
 
-                # Отримуємо свічки з біржі
-                klines_raw = await trading_engine.exchange.get_klines(symbol, tf_param, limit=500)
+                # Отримуємо свічки з біржі - БІЛЬШЕ СВІЧОК ДЛЯ ТЕХНІЧНОГО АНАЛІЗУ
+                if is_tech_analysis:
+                    # Для технічного аналізу беремо більше свічок (700)
+                    klines_raw = await trading_engine.exchange.get_klines(symbol, tf_param, limit=700)
+                else:
+                    klines_raw = await trading_engine.exchange.get_klines(symbol, tf_param, limit=500)
+
                 if not klines_raw:
                     klines_raw = []
                 klines_raw.sort(key=lambda k: k['timestamp'])
@@ -298,13 +303,18 @@ def create_flask_app(config, trading_engine):
                         break
 
                 if entry_idx == -1:
-                    # Якщо не знайшли - беремо останні свічки
-                    entry_idx = len(klines_raw) - 1
+                    # Якщо не знайшли - беремо позицію близько 1/3 від кінця
+                    entry_idx = max(0, len(klines_raw) - 200)
+                    logger.warning(f"Не знайдено точного часу входу, використовуємо індекс {entry_idx}")
 
                 # Визначаємо діапазон свічок для показу
-                # Завжди показуємо 150 свічок ДО входу і 150 ПІСЛЯ (загалом 300)
-                BEFORE_CANDLES = 150
-                AFTER_CANDLES = 150
+                # Для технічного аналізу показуємо більше свічок ДО входу
+                if is_tech_analysis:
+                    BEFORE_CANDLES = 250  # 250 свічок до входу
+                    AFTER_CANDLES = 150  # 150 свічок після входу
+                else:
+                    BEFORE_CANDLES = 150
+                    AFTER_CANDLES = 150
 
                 start_idx = max(0, entry_idx - BEFORE_CANDLES)
 
@@ -320,14 +330,15 @@ def create_flask_app(config, trading_engine):
                     else:
                         end_idx = min(len(klines_raw), entry_idx + BEFORE_CANDLES + AFTER_CANDLES)
                 else:
-                    end_idx = min(len(klines_raw), entry_idx + BEFORE_CANDLES + AFTER_CANDLES)
+                    # Для відкритої позиції - показуємо до кінця
+                    end_idx = len(klines_raw)
 
                 filtered_klines = klines_raw[start_idx:end_idx]
 
-                # Якщо свічок замало - беремо останні 300
+                # Якщо свічок замало - беремо останні 400
                 if len(filtered_klines) < 100:
-                    filtered_klines = klines_raw[-CANDLES_TO_SHOW:] if len(klines_raw) > CANDLES_TO_SHOW else klines_raw
-                    out_of_range = len(klines_raw) < CANDLES_TO_SHOW
+                    filtered_klines = klines_raw[-400:] if len(klines_raw) > 400 else klines_raw
+                    out_of_range = len(klines_raw) < 400
                 else:
                     out_of_range = False
 
@@ -339,10 +350,13 @@ def create_flask_app(config, trading_engine):
                     klines_out.append(k_copy)
 
                 # Логуємо для діагностики
-                logger.info(f"[API_TRADE_CHART] Угода {order_id}: показано {len(klines_out)} свічок, "
-                            f"ціна входу ${entry_point['price']:.2f}, "
-                            f"діапазон цін: min={min(k['low'] for k in klines_out):.2f}, "
-                            f"max={max(k['high'] for k in klines_out):.2f}")
+                entry_price_f = entry_point['price']
+                min_price = min(k['low'] for k in klines_out) if klines_out else entry_price_f
+                max_price = max(k['high'] for k in klines_out) if klines_out else entry_price_f
+
+                logger.info(f"[API_TRADE_CHART] Угода {order_id}: стратегія={strategy_name}, сторона={order_side}, "
+                            f"показано {len(klines_out)} свічок, ціна входу ${entry_price_f:.2f}, "
+                            f"діапазон цін: min=${min_price:.2f}, max=${max_price:.2f}")
 
                 return jsonify({
                     'order': order_dict,
@@ -350,6 +364,7 @@ def create_flask_app(config, trading_engine):
                     'exit_point': exit_point,
                     'klines': klines_out,
                     'symbol': symbol,
+                    'side': order_side,
                     'out_of_range': out_of_range,
                     'from_db': False
                 })
