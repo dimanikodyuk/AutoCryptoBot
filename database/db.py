@@ -134,6 +134,7 @@ def init_db():
             )
         ''')
 
+
         # Індекси для price_history
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_price_history_order_id ON price_history(order_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_price_history_symbol ON price_history(symbol)')

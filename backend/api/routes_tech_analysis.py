@@ -264,16 +264,17 @@ async def get_forecasts():
             params.append(limit)
 
             cursor = conn.execute(query, params)
-            forecasts = [dict(row) for row in cursor.fetchall()]
-
-            # Конвертуємо дати в рядки
-            for f in forecasts:
+            forecasts = []
+            for row in cursor.fetchall():
+                f = dict(row)
+                # Конвертуємо дати в рядки
                 if f.get('created_at'):
                     f['created_at'] = str(f['created_at'])
                 if f.get('expires_at'):
                     f['expires_at'] = str(f['expires_at'])
                 if f.get('resolved_at'):
                     f['resolved_at'] = str(f['resolved_at'])
+                forecasts.append(f)
 
             return jsonify({'forecasts': forecasts})
     except Exception as e:
@@ -312,6 +313,54 @@ async def get_forecast_stats():
         return jsonify({'total': 0, 'active': 0, 'success': 0, 'failed': 0, 'accuracy': 0})
 
 
+@tech_analysis_bp.route('/analyze_all', methods=['POST'])
+@async_route
+async def analyze_all_symbols():
+    """Аналіз всіх символів та створення прогнозів"""
+    strategy = get_tech_strategy()
+    if not strategy:
+        return jsonify({'success': False, 'error': 'Стратегія не знайдена'}), 404
+
+    try:
+        results = []
+        # Отримуємо дані про ціни
+        for symbol in getattr(strategy, 'symbols', ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']):
+            # Отримуємо свічки для різних таймфреймів
+            klines_data = {}
+            for tf in ['1D', '4H', '1H']:
+                klines = await strategy.exchange.get_klines(symbol, tf, limit=100)
+                if klines:
+                    klines_data[tf] = klines
+
+            # Аналізуємо символ
+            if hasattr(strategy, 'analyze_symbol'):
+                analysis = await strategy.analyze_symbol(symbol, klines_data)
+                results.append({
+                    'symbol': symbol,
+                    'signal': analysis.get('signal'),
+                    'confidence': analysis.get('confidence'),
+                    'target_price': analysis.get('target_price'),
+                    'explanation': analysis.get('explanation', [])
+                })
+
+                # Якщо є сигнал - створюємо прогноз
+                if analysis.get('signal') in ['long', 'short'] and analysis.get('confidence', 0) >= getattr(strategy,
+                                                                                                            'min_confidence',
+                                                                                                            65):
+                    await strategy.create_forecast(
+                        symbol=symbol,
+                        signal=analysis.get('signal'),
+                        target_price=analysis.get('target_price', 0),
+                        current_price=analysis.get('current_price', 0),
+                        confidence=analysis.get('confidence', 0),
+                        explanation=analysis.get('explanation', [])
+                    )
+
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        logger.error(f"Помилка аналізу всіх символів: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @tech_analysis_bp.route('/settings', methods=['POST'])
 @async_route
 async def update_settings():
@@ -345,3 +394,122 @@ async def update_settings():
     except Exception as e:
         logger.error(f"Помилка збереження налаштувань: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============= ДІАГНОСТИКА ТА ТЕСТОВІ ENDPOINTS =============
+
+@tech_analysis_bp.route('/debug/check_db', methods=['GET'])
+@async_route
+async def debug_check_db():
+    """Перевірка БД - чи є таблиця forecasts і чи є дані"""
+    try:
+        with get_db() as conn:
+            # Перевіряємо чи існує таблиця
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='forecasts'")
+            table_exists = cursor.fetchone() is not None
+
+            result = {
+                'table_exists': table_exists,
+                'forecasts_count': 0,
+                'sample_forecasts': [],
+                'tables': []
+            }
+
+            if table_exists:
+                cursor = conn.execute("SELECT COUNT(*) as count FROM forecasts")
+                result['forecasts_count'] = cursor.fetchone()['count']
+
+                # Отримуємо кілька прогнозів для прикладу
+                cursor = conn.execute("SELECT * FROM forecasts LIMIT 5")
+                for row in cursor.fetchall():
+                    result['sample_forecasts'].append(dict(row))
+
+            # Список всіх таблиць
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            result['tables'] = [row['name'] for row in cursor.fetchall()]
+
+            return jsonify(result)
+    except Exception as e:
+        logger.error(f"Помилка діагностики: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@tech_analysis_bp.route('/test/create_forecast', methods=['POST'])
+@async_route
+async def test_create_forecast():
+    """Тестовий ендпоінт для створення прогнозу"""
+    data = request.json
+
+    symbol = data.get('symbol', 'BTCUSDT')
+    signal_type = data.get('signal_type', 'long')
+    entry_price = data.get('entry_price', 50000)
+    target_price = data.get('target_price', 52000)
+    confidence = data.get('confidence', 75)
+    explanation = data.get('explanation', 'Тестовий прогноз з веб-інтерфейсу')
+
+    try:
+        from datetime import datetime, timedelta
+
+        with get_db() as conn:
+            conn.execute("""
+                INSERT INTO forecasts (
+                    strategy, symbol, signal_type, entry_price, target_price,
+                    confidence, explanation, status, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                'tech_analysis', symbol, signal_type, entry_price, target_price,
+                confidence, explanation, 'active', datetime.now(),
+                datetime.now() + timedelta(hours=24)
+            ))
+
+        logger.info(f"✅ Тестовий прогноз створено для {symbol}")
+        return jsonify({'success': True, 'message': f'Прогноз для {symbol} створено'})
+    except Exception as e:
+        logger.error(f"Помилка створення тестового прогнозу: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@tech_analysis_bp.route('/create_forecast', methods=['POST'])
+@async_route
+async def create_forecast_manual():
+    """Ручне створення прогнозу через API"""
+    data = request.json
+
+    required = ['symbol', 'signal_type', 'target_price']
+    for field in required:
+        if not data.get(field):
+            return jsonify({'error': f'Поле {field} обов\'язкове'}), 400
+
+    try:
+        from datetime import datetime, timedelta
+
+        symbol = data['symbol'].upper()
+        if not symbol.endswith('USDT'):
+            symbol += 'USDT'
+
+        with get_db() as conn:
+            # Отримуємо поточну ціну з ордерів або використовуємо entry_price з запиту
+            entry_price = data.get('entry_price', 0)
+
+            conn.execute("""
+                INSERT INTO forecasts (
+                    strategy, symbol, signal_type, entry_price, target_price,
+                    confidence, explanation, status, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                'tech_analysis',
+                symbol,
+                data['signal_type'],
+                entry_price,
+                data['target_price'],
+                data.get('confidence', 70),
+                data.get('explanation', 'Ручний прогноз'),
+                'active',
+                datetime.now(),
+                datetime.now() + timedelta(hours=data.get('hours', 24))
+            ))
+
+        return jsonify({'success': True, 'message': f'Прогноз для {symbol} створено'})
+    except Exception as e:
+        logger.error(f"Помилка створення прогнозу: {e}")
+        return jsonify({'error': str(e)}), 500

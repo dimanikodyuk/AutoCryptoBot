@@ -706,6 +706,13 @@
                 </div>
             </div>
 
+            <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
+    <button class="btn-toggle" onclick="toggleTechAnalysis()" id="taToggleBtn">✅ Запустити стратегію</button>
+    <button class="btn-reset" onclick="resetTechAnalysis()">🔄 Скинути стратегію</button>
+    <button onclick="testCreateForecast()" style="background: #9b59b6;">🧪 Створити тестовий прогноз</button>
+    <button onclick="checkForecastDB()" style="background: #007bff;">🔍 Перевірити БД прогнозів</button>
+</div>
+
             <!-- Статистика -->
             <div class="stats-grid" id="taStats">
                 <div class="stat-card"><div class="stat-value" id="taBalance">$0</div><div class="stat-label">Баланс</div></div>
@@ -3743,6 +3750,66 @@ async function updateScalpPnL() {
         console.error('Помилка завантаження графіка:', e);
         const chartDiv = document.getElementById('techChartContainer');
         if (chartDiv) chartDiv.innerHTML = '<div class="loading">❌ Помилка завантаження графіка: ' + e.message + '</div>';
+    }
+}
+        async function testCreateForecast() {
+    const symbol = prompt('Введіть символ (напр. BTCUSDT):', 'BTCUSDT');
+    if (!symbol) return;
+
+    const signalType = prompt('Тип сигналу (long/short):', 'long');
+    const targetPrice = parseFloat(prompt('Цільова ціна:', '52000'));
+    const confidence = parseInt(prompt('Впевненість (0-100):', '75'));
+
+    try {
+        const response = await fetch('/api/tech_analysis/test/create_forecast', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: symbol,
+                signal_type: signalType,
+                target_price: targetPrice,
+                confidence: confidence,
+                entry_price: 50000
+            })
+        });
+        const result = await response.json();
+        if (result.success) {
+            alert('✅ Тестовий прогноз створено!');
+            loadTechForecasts();
+            loadTechAnalysisStatus();
+        } else {
+            alert('❌ Помилка: ' + (result.error || 'невідома'));
+        }
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка: ' + e.message);
+    }
+}
+
+async function checkForecastDB() {
+    try {
+        const response = await fetch('/api/tech_analysis/debug/check_db');
+        const data = await response.json();
+
+        let message = `📊 Стан БД прогнозів:\n`;
+        message += `└ Таблиця forecasts існує: ${data.table_exists ? '✅ Так' : '❌ Ні'}\n`;
+        message += `└ Кількість прогнозів: ${data.forecasts_count}\n`;
+        message += `└ Таблиці в БД: ${data.tables.join(', ')}\n\n`;
+
+        if (data.sample_forecasts && data.sample_forecasts.length > 0) {
+            message += `📋 Приклад прогнозів:\n`;
+            for (const f of data.sample_forecasts) {
+                message += `└ ${f.symbol}: ${f.signal_type} до $${f.target_price} (${f.status})\n`;
+            }
+        } else {
+            message += `⚠️ Немає жодного прогнозу в БД!\n`;
+            message += `Спробуйте створити тестовий прогноз кнопкою "Створити тестовий прогноз"`;
+        }
+
+        alert(message);
+    } catch(e) {
+        console.error(e);
+        alert('❌ Помилка перевірки: ' + e.message);
     }
 }
 

@@ -1,34 +1,35 @@
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 
 conn = sqlite3.connect('trading_bot.db')
 cursor = conn.cursor()
 
-# Отримуємо ID стратегії
+# Видаляємо всі старі свічки
+cursor.execute("DELETE FROM price_history")
+
+# Видаляємо всі відкриті угоди тех. аналізу
+cursor.execute("""
+    DELETE FROM orders 
+    WHERE strategy_id = (SELECT id FROM strategies WHERE name = 'tech_analysis') 
+    AND status = 'open'
+""")
+
+# Створюємо нову угоду з поточною ціною
 cursor.execute("SELECT id FROM strategies WHERE name = 'tech_analysis'")
-result = cursor.fetchone()
+strategy_id = cursor.fetchone()[0]
 
-if result:
-    strategy_id = result[0]
+# Поточна ціна ~ 77300
+entry_price = 77300
+order_id = f"fresh_{int(datetime.now().timestamp())}"
+opened_at = datetime.now().isoformat()
 
-    # Поточна ціна BTC ~ 77300
-    current_price = 77300
-    entry_price = current_price - 200  # Трохи нижче поточної ціни
+cursor.execute("""
+    INSERT INTO orders 
+    (order_id, strategy_id, symbol, side, price, quantity, status, order_type, opened_at, signal_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+""", (order_id, strategy_id, 'BTCUSDT', 'buy', entry_price, 0.0013, 'open', 'Market', opened_at, 'FRESH'))
 
-    order_id = f"ta_test_{int(datetime.now().timestamp())}"
-    opened_at = (datetime.now() - timedelta(minutes=30)).isoformat()
-
-    cursor.execute("""
-        INSERT INTO orders 
-        (order_id, strategy_id, symbol, side, price, quantity, status, order_type, opened_at, signal_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (order_id, strategy_id, 'BTCUSDT', 'buy', entry_price, 0.0013, 'open', 'Market', opened_at, 'TEST'))
-
-    conn.commit()
-    print(f"✅ Створено тестову угоду: {order_id}")
-    print(f"   Ціна входу: ${entry_price}")
-    print(f"   Час відкриття: {opened_at}")
-else:
-    print("❌ Стратегію не знайдено")
-
+conn.commit()
+print(f"✅ Створено FRESH угоду: {order_id} @ ${entry_price}")
+print(f"   Час: {opened_at}")
 conn.close()
