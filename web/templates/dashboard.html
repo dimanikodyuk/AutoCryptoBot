@@ -4584,7 +4584,7 @@ function detectCandlePatterns(klines) {
             const pnlSign = currentPnl >= 0 ? '+' : '';
 
             html += `
-                <tr style="border-bottom: 1px solid #2a2a4a;">
+                <tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${currentPnl.toFixed(4)}, '${o.opened_at}')" style="border-bottom: 1px solid #2a2a4a; cursor: pointer;">
                     <td style="padding: 12px;">${openedAt}</td>
                     <td style="padding: 12px;"><strong>${o.symbol}</strong></td>
                     <td style="padding: 12px;" class="${sideClass}">${sideText}</td>
