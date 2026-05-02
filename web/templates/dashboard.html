@@ -2658,7 +2658,9 @@ async function testFileLogs() {
             entryDate: null, exitDate: null,
             tf: '1', chartType: 'candle',
             indicators: { ema: false, bb: false, vol: false, rsi: false },
-            klineCache: {}
+            klineCache: {},
+            tradeEntryPrice: null, tradeQuantity: null, isOpen: false,
+            _pnlInterval: null
         };
 
         async function showTradeChart(orderId, symbol, side, price, quantity, pnl, timestamp) {
@@ -2668,9 +2670,15 @@ async function testFileLogs() {
 
     _tradeState.orderId = orderId;
     _tradeState.symbol = symbol;
-    _tradeState.side = side;  // ← Додаємо сторону угоди
+    _tradeState.side = side;
     _tradeState.tf = '1';
     _tradeState.klineCache = {};
+    _tradeState.tradeEntryPrice = parseFloat(price);
+    _tradeState.tradeQuantity = parseFloat(quantity);
+    _tradeState.isOpen = (parseFloat(pnl) === 0 && !timestamp.includes('closed'));
+
+    // Зупиняємо попередній інтервал якщо був
+    if (_tradeState._pnlInterval) { clearInterval(_tradeState._pnlInterval); _tradeState._pnlInterval = null; }
 
     const pnlVal = parseFloat(pnl || 0);
     const badge = document.getElementById('tradeModalBadge');
@@ -2684,12 +2692,28 @@ async function testFileLogs() {
 
     const infoEl = document.getElementById('tradeInfo');
     if (infoEl) {
+        // Для відкритих угод pnl може бути 0 — розраховуємо одразу з поточної ціни якщо є
+        const currentPriceNow = (window.techCurrentPrices?.[symbol] || window.currentPrices?.[symbol] || parseFloat(price));
+        const entryP = parseFloat(price);
+        const qty = parseFloat(quantity);
+        const commRate = 0.001;
+        function calcLivePnl(cp) {
+            const cost = qty * entryP;
+            const rev  = qty * cp;
+            const comm = (cost + rev) * commRate;
+            return (side === 'buy' ? (rev - cost - comm) : (cost - rev - comm));
+        }
+        const initPnl = (pnlVal !== 0) ? pnlVal : calcLivePnl(currentPriceNow);
+        const initPnlClass = initPnl >= 0 ? 'buy' : 'sell';
+        const initPnlSign  = initPnl >= 0 ? '+' : '';
+
         infoEl.innerHTML = `
             <div class="trade-info-item"><div class="trade-info-label">Ордер ID</div><div class="trade-info-value" style="font-size:11px;">${String(orderId).substring(0,22)}…</div></div>
             <div class="trade-info-item"><div class="trade-info-label">Тип угоди</div><div class="trade-info-value ${side === 'buy' ? 'buy' : 'sell'}">${side === 'buy' ? '🟢 LONG' : '🔴 SHORT'}</div></div>
-            <div class="trade-info-item"><div class="trade-info-label">Ціна входу</div><div class="trade-info-value">$${parseFloat(price).toFixed(2)}</div></div>
-            <div class="trade-info-item"><div class="trade-info-label">Кількість</div><div class="trade-info-value">${parseFloat(quantity).toFixed(6)}</div></div>
-            <div class="trade-info-item"><div class="trade-info-label">PnL</div><div class="trade-info-value ${pnlVal>=0?'buy':'sell'}" style="font-size:20px;font-weight:bold;">${pnlVal>=0?'+':''}$${pnlVal.toFixed(2)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">Ціна входу</div><div class="trade-info-value">$${entryP.toFixed(2)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">Поточна ціна</div><div class="trade-info-value" id="liveCurrentPrice" style="color:#00d4ff;">$${currentPriceNow.toFixed(2)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">Кількість</div><div class="trade-info-value">${qty.toFixed(6)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">PnL (з комісією)</div><div class="trade-info-value ${initPnlClass}" id="livePnlValue" style="font-size:20px;font-weight:bold;">${initPnlSign}$${Math.abs(initPnl).toFixed(4)}</div></div>
             <div class="trade-info-item"><div class="trade-info-label">Час відкриття</div><div class="trade-info-value">${new Date(timestamp).toLocaleString()}</div></div>
         `;
     }
@@ -2701,6 +2725,32 @@ async function testFileLogs() {
     const chartContainer = document.getElementById('tradeChartContainer');
     if (chartContainer) chartContainer.innerHTML = '<div class="loading-chart">⏳ Завантаження свічок...</div>';
     await _loadAndDrawTradeChart();
+
+    // Запускаємо live-оновлення PnL кожну секунду
+    _tradeState._pnlInterval = setInterval(() => {
+        const pnlEl = document.getElementById('livePnlValue');
+        const priceEl = document.getElementById('liveCurrentPrice');
+        if (!pnlEl && !priceEl) return;
+        const sym = _tradeState.symbol;
+        const ep  = _tradeState.tradeEntryPrice;
+        const qty = _tradeState.tradeQuantity;
+        const sd  = _tradeState.side;
+        if (!sym || !ep || !qty) return;
+        const cp = window.techCurrentPrices?.[sym] || window.currentPrices?.[sym] || ep;
+        const cost = qty * ep;
+        const rev  = qty * cp;
+        const comm = (cost + rev) * 0.001;
+        const livePnl = sd === 'buy' ? (rev - cost - comm) : (cost - rev - comm);
+        const cls  = livePnl >= 0 ? '#00ff88' : '#ff4444';
+        const sign = livePnl >= 0 ? '+' : '';
+        if (pnlEl) {
+            pnlEl.style.color = cls;
+            pnlEl.textContent = `${sign}$${Math.abs(livePnl).toFixed(4)}`;
+        }
+        if (priceEl) {
+            priceEl.textContent = `$${cp.toFixed(2)}`;
+        }
+    }, 1000);
 }
 
         async function _loadAndDrawTradeChart() {
@@ -2847,18 +2897,18 @@ async function testFileLogs() {
                       yaxis: 'y', showlegend: false, hoverinfo: 'skip' });
     }
 
-    // Розрахунок діапазону для осі Y (включаємо ціну входу завжди)
+    // Розрахунок діапазону для осі Y
     const allPrices = [...closes, ...highs, ...lows];
-    if (entryPrice) allPrices.push(entryPrice);
     if (exitPrice) allPrices.push(exitPrice);
+    // Включаємо ціну входу в діапазон ТІЛЬКИ якщо вона в межах свічок
+    if (entryPrice && entryInRange) allPrices.push(entryPrice);
     const minP = Math.min(...allPrices);
     const maxP = Math.max(...allPrices);
-    // Базовий pad від діапазону свічок, але не менше ніж потрібно для entryPrice
     const candleRange = Math.max(...highs) - Math.min(...lows);
     const pad = Math.max(candleRange * 0.08, (maxP - minP) * 0.05) || maxP * 0.005;
-    // Гарантуємо що entryPrice з відступом потрапляє у range
-    const yRangeMin = Math.min(minP, entryPrice || minP, exitPrice || minP) - pad;
-    const yRangeMax = Math.max(maxP, entryPrice || maxP, exitPrice || maxP) + pad;
+    // Якщо ціна входу поза свічками — додаємо горизонтальну лінію але не змінюємо масштаб
+    const yRangeMin = minP - pad;
+    const yRangeMax = maxP + pad;
 
     const allDates = [...dates];
     // Для X-діапазону НЕ включаємо entryDate якщо він поза межами свічок
@@ -2980,7 +3030,7 @@ async function testFileLogs() {
         async function changeTradeTf(tf) { _tradeState.tf = tf; document.querySelectorAll('.tf-btn[id^="tf_trade_"]').forEach(b => b.classList.remove('tf-active')); const btn = document.getElementById(`tf_trade_${tf}`); if (btn) btn.classList.add('tf-active'); await _loadAndDrawTradeChart(); }
         function changeTradeChartType(type) { _tradeState.chartType = type; document.getElementById('ct_candle')?.classList.toggle('tf-active', type === 'candle'); document.getElementById('ct_line')?.classList.toggle('tf-active', type === 'line'); if (_tradeState.klineCache[_tradeState.tf]) _drawTradeChart(_tradeState.klineCache[_tradeState.tf]); }
         function toggleTradeIndicator(name) { _tradeState.indicators[name] = !_tradeState.indicators[name]; const btn = document.getElementById(`ind_${name}`); if (btn) btn.classList.toggle('ind-active', _tradeState.indicators[name]); if (_tradeState.klineCache[_tradeState.tf]) _drawTradeChart(_tradeState.klineCache[_tradeState.tf]); }
-        function closeTradeModal() { const modal = document.getElementById('tradeModal'); if (modal) modal.style.display = 'none'; const chartContainer = document.getElementById('tradeChartContainer'); if (chartContainer) chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...</div>'; const rsiContainer = document.getElementById('tradeRsiContainer'); if (rsiContainer) rsiContainer.style.display = 'none'; _tradeState.klineCache = {}; }
+        function closeTradeModal() { const modal = document.getElementById('tradeModal'); if (modal) modal.style.display = 'none'; const chartContainer = document.getElementById('tradeChartContainer'); if (chartContainer) chartContainer.innerHTML = '<div class="loading-chart">Завантаження графіка...</div>'; const rsiContainer = document.getElementById('tradeRsiContainer'); if (rsiContainer) rsiContainer.style.display = 'none'; _tradeState.klineCache = {}; if (_tradeState._pnlInterval) { clearInterval(_tradeState._pnlInterval); _tradeState._pnlInterval = null; } }
         window.onclick = function(event) { const modal = document.getElementById('tradeModal'); if (event.target === modal) closeTradeModal(); }
 
         // ============= БЕКТЕСТИНГ =============
@@ -4584,7 +4634,7 @@ function detectCandlePatterns(klines) {
             const pnlSign = currentPnl >= 0 ? '+' : '';
 
             html += `
-                <tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${currentPnl.toFixed(4)}, '${o.opened_at}')" style="border-bottom: 1px solid #2a2a4a; cursor: pointer;">
+                <tr style="border-bottom: 1px solid #2a2a4a;">
                     <td style="padding: 12px;">${openedAt}</td>
                     <td style="padding: 12px;"><strong>${o.symbol}</strong></td>
                     <td style="padding: 12px;" class="${sideClass}">${sideText}</td>
