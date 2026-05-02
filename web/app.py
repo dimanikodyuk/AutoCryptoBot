@@ -12,10 +12,11 @@ from functools import wraps
 import logging
 from utils.logger_utils import setup_logger
 from database.db import get_db, get_price_history
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from web.hooks import register_webhook_routes
 from web.webhook_routes import register_webhook_routes
 from backend.api.routes_tech_analysis import tech_analysis_bp, init_trading_engine
+import pytz
 
 logger = setup_logger('web')
 
@@ -153,12 +154,15 @@ def create_flask_app(config, trading_engine):
     @app.route('/api/trade_chart/<order_id>')
     @async_route
     async def api_trade_chart(order_id):
-        """Отримання даних для графіка угоди - ВИПРАВЛЕНО для TECH ANALYSIS"""
+        """Отримання даних для графіка угоди - ВСЕ В UTC"""
         try:
             logger.info(f"Запит графіка для ордера: {order_id}")
 
             from database.db import get_price_history
-            saved_klines = get_price_history(order_id)
+            from datetime import datetime, timezone
+
+            # UTC часовий пояс
+            UTC_TZ = timezone.utc
 
             with get_db() as conn:
                 cursor = conn.execute(
@@ -174,128 +178,74 @@ def create_flask_app(config, trading_engine):
 
                 order_dict = dict(order)
                 strategy_name = order_dict.get('strategy_name', 'unknown')
-                is_tech_analysis = strategy_name == 'tech_analysis'
                 symbol = order_dict['symbol']
                 order_side = order_dict.get('side', 'buy')
 
-                col_info = conn.execute("PRAGMA table_info(orders)").fetchall()
-                has_closed_price = any(c[1] == 'closed_price' for c in col_info)
-
                 tf_param = request.args.get('tf', '15')
-
-                # Визначаємо часофрейм для графіка
                 valid_tfs = {'1', '3', '5', '15', '30', '60', '120', '240', 'D'}
                 if tf_param not in valid_tfs:
                     tf_param = '15'
 
-                # Якщо є збережені свічки - використовуємо їх
-                if saved_klines and len(saved_klines) > 0:
-                    entry_point = {
-                        'price': float(order_dict['price']),
-                        'timestamp': order_dict['opened_at'],
-                        'quantity': float(order_dict['quantity'])
-                    }
+                # Парсимо час входу - конвертуємо в UTC
+                opened_at_str = order_dict['opened_at']
+                # Видаляємо мікросекунди якщо є
+                if '.' in opened_at_str:
+                    opened_at_str = opened_at_str.split('.')[0]
 
-                    exit_point = None
-                    if order_dict['status'] == 'closed':
-                        closed_price = None
-                        if has_closed_price and order_dict.get('closed_price'):
-                            closed_price = float(order_dict['closed_price'])
-
-                        if not closed_price and order_dict.get('pnl') is not None and order_dict.get('quantity'):
-                            qty = float(order_dict['quantity'])
-                            entry_p = float(order_dict['price'])
-                            pnl = float(order_dict.get('pnl', 0))
-                            commission = float(order_dict.get('commission', 0))
-                            if qty > 0:
-                                cost = qty * entry_p
-                                revenue = cost + pnl + commission
-                                closed_price = revenue / qty
-
-                        if closed_price:
-                            exit_point = {
-                                'price': closed_price,
-                                'timestamp': order_dict.get('closed_at') or order_dict['opened_at'],
-                                'quantity': float(order_dict['quantity'])
-                            }
-
-                    # Додаємо інформацію про сторону угоди для фронтенду
-                    return jsonify({
-                        'order': order_dict,
-                        'entry_point': entry_point,
-                        'exit_point': exit_point,
-                        'klines': saved_klines,
-                        'symbol': symbol,
-                        'side': order_side,
-                        'from_db': True
-                    })
-
-                # Якщо збережених свічок немає - завантажуємо нові
-                logger.info(f"Збережених свічок немає, завантажуємо з Bybit для угоди {order_id}")
+                entry_dt = datetime.fromisoformat(opened_at_str)
+                # Якщо немає часової зони - вважаємо що це локальний час і конвертуємо в UTC
+                if entry_dt.tzinfo is None:
+                    # Додаємо інформацію про локальний час (Київ UTC+3)
+                    import pytz
+                    kyiv_tz = pytz.timezone('Europe/Kiev')
+                    entry_dt = kyiv_tz.localize(entry_dt).astimezone(UTC_TZ)
 
                 entry_point = {
                     'price': float(order_dict['price']),
-                    'timestamp': order_dict['opened_at'],
+                    'timestamp': int(entry_dt.timestamp() * 1000),
+                    'timestamp_str': entry_dt.strftime('%Y-%m-%d %H:%M:%S UTC'),
                     'quantity': float(order_dict['quantity'])
                 }
 
+                # Точка виходу
                 exit_point = None
                 if order_dict['status'] == 'closed':
                     closed_price = None
+                    col_info = conn.execute("PRAGMA table_info(orders)").fetchall()
+                    has_closed_price = any(c[1] == 'closed_price' for c in col_info)
+
                     if has_closed_price and order_dict.get('closed_price'):
                         closed_price = float(order_dict['closed_price'])
 
-                    if not closed_price and order_dict.get('pnl') is not None and order_dict.get('quantity'):
-                        qty = float(order_dict['quantity'])
-                        entry_p = float(order_dict['price'])
-                        pnl = float(order_dict.get('pnl', 0))
-                        commission = float(order_dict.get('commission', 0))
-                        if qty > 0:
-                            cost = qty * entry_p
-                            revenue = cost + pnl + commission
-                            closed_price = revenue / qty
-
                     if closed_price:
+                        closed_at_str = order_dict.get('closed_at') or order_dict['opened_at']
+                        if '.' in closed_at_str:
+                            closed_at_str = closed_at_str.split('.')[0]
+
+                        exit_dt = datetime.fromisoformat(closed_at_str)
+                        if exit_dt.tzinfo is None:
+                            import pytz
+                            kyiv_tz = pytz.timezone('Europe/Kiev')
+                            exit_dt = kyiv_tz.localize(exit_dt).astimezone(UTC_TZ)
+
                         exit_point = {
                             'price': closed_price,
-                            'timestamp': order_dict.get('closed_at') or order_dict['opened_at'],
+                            'timestamp': int(exit_dt.timestamp() * 1000),
+                            'timestamp_str': exit_dt.strftime('%Y-%m-%d %H:%M:%S UTC'),
                             'quantity': float(order_dict['quantity'])
                         }
 
-                # ============= ОСНОВНЕ ВИПРАВЛЕННЯ: завжди показуємо достатньо свічок =============
-                from datetime import datetime, timezone, timedelta
+                # Завантажуємо свічки з Bybit (вони в UTC)
+                limit_map = {'1': 500, '3': 500, '5': 500, '15': 400, '30': 300, '60': 200, '120': 150, '240': 150,
+                             'D': 100}
+                limit = limit_map.get(tf_param, 300)
 
-                # Отримуємо свічки з біржі - БІЛЬШЕ СВІЧОК ДЛЯ ТЕХНІЧНОГО АНАЛІЗУ
-                if is_tech_analysis:
-                    # Для технічного аналізу беремо більше свічок (700)
-                    klines_raw = await trading_engine.exchange.get_klines(symbol, tf_param, limit=700)
-                else:
-                    klines_raw = await trading_engine.exchange.get_klines(symbol, tf_param, limit=500)
-
+                klines_raw = await trading_engine.exchange.get_klines(symbol, tf_param, limit=limit)
                 if not klines_raw:
                     klines_raw = []
                 klines_raw.sort(key=lambda k: k['timestamp'])
 
-                # Парсимо час входу
-                def parse_dt(ts_str):
-                    if not ts_str:
-                        return None
-                    try:
-                        dt = datetime.fromisoformat(str(ts_str).replace('Z', '+00:00'))
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        return dt
-                    except Exception:
-                        return None
-
-                entry_dt = parse_dt(entry_point['timestamp'])
-                if entry_dt is None:
-                    return jsonify({'error': 'Не вдалося розпарсити час відкриття угоди'}), 400
-
-                exit_dt = parse_dt(exit_point['timestamp']) if exit_point else None
-
-                # Знаходимо індекс свічки, найближчої до часу входу
-                entry_ts_ms = int(entry_dt.timestamp() * 1000)
+                entry_ts_ms = entry_point['timestamp']
                 entry_idx = -1
                 for i, k in enumerate(klines_raw):
                     if k['timestamp'] >= entry_ts_ms:
@@ -303,60 +253,31 @@ def create_flask_app(config, trading_engine):
                         break
 
                 if entry_idx == -1:
-                    # Якщо не знайшли - беремо позицію близько 1/3 від кінця
-                    entry_idx = max(0, len(klines_raw) - 200)
-                    logger.warning(f"Не знайдено точного часу входу, використовуємо індекс {entry_idx}")
+                    entry_idx = len(klines_raw) - 1
 
-                # Визначаємо діапазон свічок для показу
-                # Для технічного аналізу показуємо більше свічок ДО входу
-                if is_tech_analysis:
-                    BEFORE_CANDLES = 250  # 250 свічок до входу
-                    AFTER_CANDLES = 150  # 150 свічок після входу
-                else:
-                    BEFORE_CANDLES = 150
-                    AFTER_CANDLES = 150
+                # Визначаємо діапазон
+                BEFORE_CANDLES = 100
+                AFTER_CANDLES = 300
 
                 start_idx = max(0, entry_idx - BEFORE_CANDLES)
-
-                if exit_dt:
-                    exit_ts_ms = int(exit_dt.timestamp() * 1000)
-                    exit_idx = -1
-                    for i, k in enumerate(klines_raw):
-                        if k['timestamp'] >= exit_ts_ms:
-                            exit_idx = i
-                            break
-                    if exit_idx != -1:
-                        end_idx = min(len(klines_raw), exit_idx + AFTER_CANDLES)
-                    else:
-                        end_idx = min(len(klines_raw), entry_idx + BEFORE_CANDLES + AFTER_CANDLES)
-                else:
-                    # Для відкритої позиції - показуємо до кінця
-                    end_idx = len(klines_raw)
+                end_idx = min(len(klines_raw), entry_idx + AFTER_CANDLES)
 
                 filtered_klines = klines_raw[start_idx:end_idx]
 
-                # Якщо свічок замало - беремо останні 400
-                if len(filtered_klines) < 100:
-                    filtered_klines = klines_raw[-400:] if len(klines_raw) > 400 else klines_raw
-                    out_of_range = len(klines_raw) < 400
-                else:
-                    out_of_range = False
-
-                # Додаємо time_iso для кожної свічки
+                # Відправляємо свічки як є (в UTC)
                 klines_out = []
                 for k in filtered_klines:
-                    k_copy = dict(k)
-                    k_copy['time_iso'] = datetime.utcfromtimestamp(k['timestamp'] / 1000).strftime('%Y-%m-%dT%H:%M:%S')
+                    k_copy = {
+                        'timestamp': k['timestamp'],
+                        'open': k['open'],
+                        'high': k['high'],
+                        'low': k['low'],
+                        'close': k['close'],
+                        'volume': k['volume']
+                    }
                     klines_out.append(k_copy)
 
-                # Логуємо для діагностики
-                entry_price_f = entry_point['price']
-                min_price = min(k['low'] for k in klines_out) if klines_out else entry_price_f
-                max_price = max(k['high'] for k in klines_out) if klines_out else entry_price_f
-
-                logger.info(f"[API_TRADE_CHART] Угода {order_id}: стратегія={strategy_name}, сторона={order_side}, "
-                            f"показано {len(klines_out)} свічок, ціна входу ${entry_price_f:.2f}, "
-                            f"діапазон цін: min=${min_price:.2f}, max=${max_price:.2f}")
+                logger.info(f"Графік: свічок={len(klines_out)}, entry_idx={entry_idx}, total={len(klines_raw)}")
 
                 return jsonify({
                     'order': order_dict,
@@ -365,15 +286,27 @@ def create_flask_app(config, trading_engine):
                     'klines': klines_out,
                     'symbol': symbol,
                     'side': order_side,
-                    'out_of_range': out_of_range,
-                    'from_db': False
+                    'timeframe': tf_param
                 })
 
         except Exception as e:
-            logger.error(f"Помилка отримання даних графіка: {e}")
+            logger.error(f"Помилка: {e}")
             import traceback
             traceback.print_exc()
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/time')
+    @async_route
+    async def api_time():
+        from datetime import datetime
+        import pytz
+        kyiv_tz = pytz.timezone('Europe/Kiev')
+        return jsonify({
+            'utc': datetime.utcnow().isoformat(),
+            'kyiv': datetime.now(kyiv_tz).isoformat(),
+            'local': datetime.now().isoformat(),
+            'utc_timestamp': int(datetime.utcnow().timestamp() * 1000)
+        })
 
     @app.route('/api/debug/check_chart/<order_id>')
     @async_route
