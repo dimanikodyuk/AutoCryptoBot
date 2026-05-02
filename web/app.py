@@ -1240,6 +1240,19 @@ def create_flask_app(config, trading_engine):
 
         return jsonify(logs)
 
+    @app.route('/api/price/<symbol>')
+    @async_route
+    async def api_price(symbol):
+        """Швидке отримання поточної ціни для одного символу"""
+        try:
+            price = trading_engine.exchange.current_prices.get(symbol, 0)
+            if price <= 0:
+                price = await trading_engine.exchange.get_current_price(symbol)
+            return jsonify({'price': price, 'symbol': symbol})
+        except Exception as e:
+            return jsonify({'error': str(e), 'price': 0}), 500
+
+
     @app.route('/api/logs_file/download', methods=['GET'])
     @async_route
     async def api_logs_file_download():

@@ -2692,28 +2692,13 @@ async function testFileLogs() {
 
     const infoEl = document.getElementById('tradeInfo');
     if (infoEl) {
-        // Для відкритих угод pnl може бути 0 — розраховуємо одразу з поточної ціни якщо є
-        const currentPriceNow = (window.techCurrentPrices?.[symbol] || window.currentPrices?.[symbol] || parseFloat(price));
-        const entryP = parseFloat(price);
-        const qty = parseFloat(quantity);
-        const commRate = 0.001;
-        function calcLivePnl(cp) {
-            const cost = qty * entryP;
-            const rev  = qty * cp;
-            const comm = (cost + rev) * commRate;
-            return (side === 'buy' ? (rev - cost - comm) : (cost - rev - comm));
-        }
-        const initPnl = (pnlVal !== 0) ? pnlVal : calcLivePnl(currentPriceNow);
-        const initPnlClass = initPnl >= 0 ? 'buy' : 'sell';
-        const initPnlSign  = initPnl >= 0 ? '+' : '';
-
         infoEl.innerHTML = `
             <div class="trade-info-item"><div class="trade-info-label">Ордер ID</div><div class="trade-info-value" style="font-size:11px;">${String(orderId).substring(0,22)}…</div></div>
             <div class="trade-info-item"><div class="trade-info-label">Тип угоди</div><div class="trade-info-value ${side === 'buy' ? 'buy' : 'sell'}">${side === 'buy' ? '🟢 LONG' : '🔴 SHORT'}</div></div>
-            <div class="trade-info-item"><div class="trade-info-label">Ціна входу</div><div class="trade-info-value">$${entryP.toFixed(2)}</div></div>
-            <div class="trade-info-item"><div class="trade-info-label">Поточна ціна</div><div class="trade-info-value" id="liveCurrentPrice" style="color:#00d4ff;">$${currentPriceNow.toFixed(2)}</div></div>
-            <div class="trade-info-item"><div class="trade-info-label">Кількість</div><div class="trade-info-value">${qty.toFixed(6)}</div></div>
-            <div class="trade-info-item"><div class="trade-info-label">PnL (з комісією)</div><div class="trade-info-value ${initPnlClass}" id="livePnlValue" style="font-size:20px;font-weight:bold;">${initPnlSign}$${Math.abs(initPnl).toFixed(4)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">Ціна входу</div><div class="trade-info-value">$${parseFloat(price).toFixed(2)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">Поточна ціна</div><div class="trade-info-value" id="liveCurrentPrice" style="color:#00d4ff;">$${parseFloat(price).toFixed(2)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">Кількість</div><div class="trade-info-value">${parseFloat(quantity).toFixed(6)}</div></div>
+            <div class="trade-info-item"><div class="trade-info-label">PnL (з комісією)</div><div class="trade-info-value" id="livePnlValue" style="font-size:20px;font-weight:bold;">$${pnlVal.toFixed(4)}</div></div>
             <div class="trade-info-item"><div class="trade-info-label">Час відкриття</div><div class="trade-info-value">${new Date(timestamp).toLocaleString()}</div></div>
         `;
     }
@@ -2726,31 +2711,36 @@ async function testFileLogs() {
     if (chartContainer) chartContainer.innerHTML = '<div class="loading-chart">⏳ Завантаження свічок...</div>';
     await _loadAndDrawTradeChart();
 
-    // Запускаємо live-оновлення PnL кожну секунду
-    _tradeState._pnlInterval = setInterval(() => {
-        const pnlEl = document.getElementById('livePnlValue');
-        const priceEl = document.getElementById('liveCurrentPrice');
-        if (!pnlEl && !priceEl) return;
-        const sym = _tradeState.symbol;
-        const ep  = _tradeState.tradeEntryPrice;
-        const qty = _tradeState.tradeQuantity;
-        const sd  = _tradeState.side;
-        if (!sym || !ep || !qty) return;
-        const cp = window.techCurrentPrices?.[sym] || window.currentPrices?.[sym] || ep;
-        const cost = qty * ep;
-        const rev  = qty * cp;
-        const comm = (cost + rev) * 0.001;
-        const livePnl = sd === 'buy' ? (rev - cost - comm) : (cost - rev - comm);
-        const cls  = livePnl >= 0 ? '#00ff88' : '#ff4444';
-        const sign = livePnl >= 0 ? '+' : '';
-        if (pnlEl) {
-            pnlEl.style.color = cls;
-            pnlEl.textContent = `${sign}$${Math.abs(livePnl).toFixed(4)}`;
-        }
-        if (priceEl) {
-            priceEl.textContent = `$${cp.toFixed(2)}`;
-        }
-    }, 1000);
+    // ============= LIVE PnL ОНОВЛЕННЯ =============
+    async function updateLivePnL() {
+        try {
+            // Отримуємо актуальну ціну через API
+            const priceResp = await fetch(`/api/price/${symbol}`);
+            const priceData = await priceResp.json();
+            const currentPrice = priceData.price || parseFloat(price);
+
+            const entryP = parseFloat(price);
+            const qty = parseFloat(quantity);
+            const commRate = 0.001;
+            const cost = qty * entryP;
+            const rev = qty * currentPrice;
+            const comm = (cost + rev) * commRate;
+            const livePnl = side === 'buy' ? (rev - cost - comm) : (cost - rev - comm);
+
+            const pnlEl = document.getElementById('livePnlValue');
+            const priceEl = document.getElementById('liveCurrentPrice');
+            if (pnlEl) {
+                pnlEl.textContent = `${livePnl >= 0 ? '+' : ''}$${Math.abs(livePnl).toFixed(4)}`;
+                pnlEl.style.color = livePnl >= 0 ? '#00ff88' : '#ff4444';
+            }
+            if (priceEl) priceEl.textContent = `$${currentPrice.toFixed(2)}`;
+        } catch(e) { console.error('Live PnL update error:', e); }
+    }
+
+    // Оновлюємо кожну секунду
+    if (_tradeState._pnlInterval) clearInterval(_tradeState._pnlInterval);
+    updateLivePnL(); // перше оновлення
+    _tradeState._pnlInterval = setInterval(updateLivePnL, 1000);
 }
 
         async function _loadAndDrawTradeChart() {
@@ -2773,7 +2763,21 @@ async function testFileLogs() {
             } catch(e) { console.error('Помилка завантаження графіка:', e); container.innerHTML = '<div class="loading-chart">❌ Помилка завантаження</div>'; }
         }
 
-        function _parseDate(val) { if (!val) return null; if (typeof val === 'number') return new Date(val); const s = String(val); if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)) return new Date(s + 'Z'); return new Date(s); }
+        // ВИПРАВЛЕННЯ 1: _parseDate - правильно обробляємо локальний час
+        function _parseDate(val) {
+            if (!val) return null;
+            if (typeof val === 'number') return new Date(val);
+            const s = String(val);
+            // Якщо вже є UTC/Z - залишаємо
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(s)) return new Date(s);
+            // Якщо ISO без Z (локальний час) - додаємо Z і створюємо
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)) {
+                // Конвертуємо локальний час в UTC (додаємо offset)
+                const localDate = new Date(s);
+                return new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000);
+            }
+            return new Date(s);
+        }
 
         function _calcEMA(prices, period) {
             if (prices.length < period) return Array(prices.length).fill(null);
@@ -2900,8 +2904,10 @@ async function testFileLogs() {
     // Розрахунок діапазону для осі Y
     const klinesMinDate = dates.length > 0 ? dates[0] : null;
     const klinesMaxDate = dates.length > 0 ? dates[dates.length - 1] : null;
-    const entryInRange = entryDate && klinesMinDate && klinesMaxDate &&
-                         entryDate >= klinesMinDate && entryDate <= klinesMaxDate;
+    const entryTs = entryDate ? entryDate.getTime() : null;
+    const firstTs = dates.length > 0 ? dates[0].getTime() : null;
+    const lastTs = dates.length > 0 ? dates[dates.length-1].getTime() : null;
+    const entryInRange = entryTs && firstTs && lastTs && entryTs >= firstTs - 60000 && entryTs <= lastTs + 60000;
 
     const allPrices = [...closes, ...highs, ...lows];
     if (exitPrice) allPrices.push(exitPrice);
@@ -4599,8 +4605,6 @@ function detectCandlePatterns(klines) {
             return;
         }
 
-        table.innerHTML = '';
-
         let html = `
             <div class="orders-table">
                 <table style="width: 100%; border-collapse: collapse;">
@@ -4626,28 +4630,38 @@ function detectCandlePatterns(klines) {
             const sideClass = o.side === 'buy' ? 'buy' : 'sell';
             const sideText = o.side === 'buy' ? '📈 LONG' : '📉 SHORT';
             const statusText = o.status === 'open' ? '🟢 Відкрито' : '🔒 Закрито';
-            const currentPrice = o.status === 'open' ? (window.techCurrentPrices?.[o.symbol] || o.price) : o.closed_price || o.price;
-            const currentPnl = o.status === 'open' ? (o.side === 'buy' ?
-                (currentPrice - o.price) * o.quantity :
-                (o.price - currentPrice) * o.quantity) : pnlValue;
-            const pnlClass = currentPnl >= 0 ? 'buy' : 'sell';
-            const pnlSign = currentPnl >= 0 ? '+' : '';
+            const currentPrice = o.status === 'open' ? (window.techCurrentPrices?.[o.symbol] || o.price) : (o.closed_price || o.price);
 
-            html += `
-                <tr style="border-bottom: 1px solid #2a2a4a;">
-                    <td style="padding: 12px;">${openedAt}</td>
-                    <td style="padding: 12px;"><strong>${o.symbol}</strong></td>
-                    <td style="padding: 12px;" class="${sideClass}">${sideText}</td>
-                    <td style="padding: 12px;">$${parseFloat(o.price).toFixed(2)}</td>
-                    <td style="padding: 12px; color: #00d4ff;">$${parseFloat(currentPrice).toFixed(2)}</td>
-                    <td style="padding: 12px;">${parseFloat(o.quantity).toFixed(6)}</td>
-                    <td style="padding: 12px;">${statusText}</td>
-                    <td style="padding: 12px;" class="${pnlClass}">${pnlSign}$${Math.abs(currentPnl).toFixed(2)}</td>
-                    <td style="padding: 12px;" onclick="event.stopPropagation()">
-                        ${o.status === 'open' ? `<button class="btn-small" style="background:#dc3545;" onclick="forceCloseTechPosition('${o.symbol}', '${o.order_id}')">❌ Закрити</button>` : '-'}
-                    </td>
-                </tr>
-            `;
+            // Розрахунок PnL для відкритих позицій
+            let displayPnl = pnlValue;
+            let pnlClass = pnlValue >= 0 ? 'buy' : 'sell';
+            let pnlSign = pnlValue >= 0 ? '+' : '';
+
+            if (o.status === 'open') {
+                const qty = parseFloat(o.quantity);
+                const entryP = parseFloat(o.price);
+                const currentP = currentPrice;
+                const grossPnl = o.side === 'buy' ? (currentP - entryP) * qty : (entryP - currentP) * qty;
+                const comm = (qty * entryP + qty * currentP) * 0.001;
+                const realPnl = grossPnl - comm;
+                displayPnl = realPnl;
+                pnlClass = realPnl >= 0 ? 'buy' : 'sell';
+                pnlSign = realPnl >= 0 ? '+' : '';
+            }
+
+            html += `<tr onclick="showTradeChart('${o.order_id}', '${o.symbol}', '${o.side}', ${o.price}, ${o.quantity}, ${o.pnl || 0}, '${o.opened_at}')" style="cursor: pointer; border-bottom: 1px solid #2a2a4a;">
+                <td style="padding: 12px;">${openedAt}</td>
+                <td style="padding: 12px;"><strong>${o.symbol}</strong></td>
+                <td style="padding: 12px;" class="${sideClass}">${sideText}</td>
+                <td style="padding: 12px;">$${parseFloat(o.price).toFixed(2)}</td>
+                <td style="padding: 12px; color: #00d4ff;" id="ta_price_${o.order_id}">$${parseFloat(currentPrice).toFixed(2)}</td>
+                <td style="padding: 12px;">${parseFloat(o.quantity).toFixed(6)}</td>
+                <td style="padding: 12px;">${statusText}</td>
+                <td style="padding: 12px;" class="${pnlClass}" id="ta_pnl_${o.order_id}">${pnlSign}$${Math.abs(displayPnl).toFixed(4)}</td>
+                <td style="padding: 12px;" onclick="event.stopPropagation()">
+                    ${o.status === 'open' ? `<button class="btn-small" style="background:#dc3545;" onclick="forceCloseTechPosition('${o.symbol}', '${o.order_id}')">❌ Закрити</button>` : '-'}
+                </td>
+            </tr>`;
         }
 
         html += `
@@ -4657,10 +4671,67 @@ function detectCandlePatterns(klines) {
         `;
         table.innerHTML = html;
 
+        // Запускаємо live оновлення для відкритих позицій
+        startTechAnalysisPnLUpdater();
+
     } catch(e) {
         console.error('Помилка завантаження угод тех. аналізу:', e);
-        document.getElementById('taOrdersTable').innerHTML = '<div class="loading">❌ Помилка завантаження: ' + e.message + '</div>';
+        const table = document.getElementById('taOrdersTable');
+        if (table) table.innerHTML = '<div class="loading">❌ Помилка завантаження: ' + e.message + '</div>';
     }
+}
+
+let techAnalysisPnLInterval = null;
+
+function startTechAnalysisPnLUpdater() {
+    if (techAnalysisPnLInterval) clearInterval(techAnalysisPnLInterval);
+
+    techAnalysisPnLInterval = setInterval(async () => {
+        try {
+            // Отримуємо актуальний статус з цінами
+            const response = await fetch('/api/tech_analysis/status');
+            const data = await response.json();
+
+            if (data.open_positions) {
+                for (const [symbol, pos] of Object.entries(data.open_positions)) {
+                    const currentPrice = data.current_prices?.[symbol] || pos.entry_price;
+
+                    // Шукаємо всі рядки з цим символом у відкритих позиціях
+                    const rows = document.querySelectorAll('#taOrdersTable tbody tr');
+                    for (const row of rows) {
+                        const symbolCell = row.cells[1];
+                        if (symbolCell && symbolCell.innerText === symbol) {
+                            const statusCell = row.cells[6];
+                            if (statusCell && statusCell.innerText.includes('Відкрито')) {
+                                // Оновлюємо ціну
+                                const priceCell = row.cells[4];
+                                if (priceCell) priceCell.innerHTML = `$${currentPrice.toFixed(2)}`;
+
+                                // Розраховуємо PnL
+                                const entryPrice = parseFloat(row.cells[3].innerText.replace('$', ''));
+                                const quantity = parseFloat(row.cells[5].innerText);
+                                const side = row.cells[2].innerText.includes('LONG') ? 'buy' : 'sell';
+
+                                const grossPnl = side === 'buy' ?
+                                    (currentPrice - entryPrice) * quantity :
+                                    (entryPrice - currentPrice) * quantity;
+                                const comm = (quantity * entryPrice + quantity * currentPrice) * 0.001;
+                                const realPnl = grossPnl - comm;
+
+                                const pnlCell = row.cells[7];
+                                if (pnlCell) {
+                                    pnlCell.innerHTML = `${realPnl >= 0 ? '+' : ''}$${Math.abs(realPnl).toFixed(4)}`;
+                                    pnlCell.className = realPnl >= 0 ? 'buy' : 'sell';
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch(e) {
+            console.error('Tech analysis PnL updater error:', e);
+        }
+    }, 2000);
 }
 
 async function forceCloseTechPosition(symbol, orderId) {
