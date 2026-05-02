@@ -849,10 +849,8 @@ class ScalpStrategy(BaseStrategy):
         """Оновлення PnL для відкритих позицій в БД"""
         for symbol, position in self.open_positions.items():
             current_price = self.current_prices.get(symbol, position['entry_price'])
-            if position['side'] == 'buy':
-                unrealized_pnl = (current_price - position['entry_price']) * position['quantity']
-            else:
-                unrealized_pnl = (position['entry_price'] - current_price) * position['quantity']
+            # Scalp завжди LONG (buy), ключа 'side' у словнику позиції немає
+            unrealized_pnl = (current_price - position['entry_price']) * position['quantity']
 
             commission_rate = 0.001
             commission = (position['quantity'] * position['entry_price'] + position[
@@ -899,15 +897,17 @@ class ScalpStrategy(BaseStrategy):
                 datetime.now()
             )
 
-            # ВИПРАВЛЕНО: правильний розрахунок PnL
-            revenue = position['quantity'] * price
-            cost = position['quantity'] * position['entry_price']
-            commission_rate = 0.001  # 0.1% комісія Bybit
+            # Правильний розрахунок PnL
+            quantity = position['quantity']
+            entry_price = position['entry_price']
+            cost = quantity * entry_price          # заблокована сума при відкритті
+            revenue = quantity * price             # виручка від продажу
+            commission_rate = 0.001                # 0.1% комісія Bybit
             commission = (cost + revenue) * commission_rate
             pnl = revenue - cost - commission
-            pnl_percent = ((price - position['entry_price']) / position['entry_price'] - commission_rate * 2) * 100
+            pnl_percent = ((price - entry_price) / entry_price - commission_rate * 2) * 100
 
-            result = await self.exchange.create_order(symbol, 'sell', 'Market', position['quantity'], price)
+            result = await self.exchange.create_order(symbol, 'sell', 'Market', quantity, price)
 
             if result.get('error'):
                 logger.error(f"Помилка закриття позиції {symbol}: {result}")
@@ -915,8 +915,12 @@ class ScalpStrategy(BaseStrategy):
                 self.open_positions[symbol] = position
                 return
 
-            self.balance += revenue - commission
+            # Повертаємо заблоковану суму + додаємо прибуток/збиток
+            self.balance += cost + pnl
             self.locked_balance -= cost
+            # Зберігаємо оновлений баланс в БД
+            self._save_balance()
+
             self.total_pnl += pnl
             self.total_trades += 1
 
@@ -1163,6 +1167,26 @@ class ScalpStrategy(BaseStrategy):
 
     async def get_status(self) -> dict:
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades else 0
+
+        # Розраховуємо нереалізований PnL для відкритих позицій
+        positions_with_pnl = {}
+        for symbol, position in self.open_positions.items():
+            current_price = self.current_prices.get(symbol, position['entry_price'])
+            entry_price = position['entry_price']
+            quantity = position['quantity']
+            unrealized_pnl = (current_price - entry_price) * quantity
+            commission_rate = 0.001
+            estimated_commission = (quantity * entry_price + quantity * current_price) * commission_rate
+            unrealized_pnl_net = unrealized_pnl - estimated_commission
+            unrealized_pnl_percent = (current_price - entry_price) / entry_price * 100 if entry_price > 0 else 0
+
+            positions_with_pnl[symbol] = {
+                **position,
+                'current_price': current_price,
+                'unrealized_pnl': round(unrealized_pnl_net, 4),
+                'unrealized_pnl_percent': round(unrealized_pnl_percent, 2),
+            }
+
         return {
             'id': self.strategy_id,
             'name': self.name,
@@ -1177,7 +1201,7 @@ class ScalpStrategy(BaseStrategy):
             'losing_trades': self.losing_trades,
             'win_rate': round(win_rate, 1),
             'symbols': self.symbols,
-            'open_positions': self.open_positions,
+            'open_positions': positions_with_pnl,
             'current_prices': self.current_prices,
             'trade_size_usdt': self.trade_size_usdt,
             'take_profit_percent': self.take_profit_percent,

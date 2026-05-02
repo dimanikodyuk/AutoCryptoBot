@@ -172,14 +172,16 @@ class TechAnalysisStrategy(BaseStrategy):
             logger.debug(f"[TechAnalysis] Максимум позицій ({self.max_concurrent_positions}) досягнуто")
             return False
 
-        # Перевіряємо загальну заблоковану суму
-        if self.locked_balance >= self.max_total_position_value:
-            logger.debug(f"[TechAnalysis] Перевищено ліміт заблокованих коштів: ${self.locked_balance:.2f} >= ${self.max_total_position_value:.2f}")
+        # Динамічний ліміт загальної заблокованої суми (50% від поточного балансу)
+        max_locked = self.balance * 0.5
+        if self.locked_balance >= max_locked:
+            logger.debug(f"[TechAnalysis] Перевищено ліміт заблокованих коштів: ${self.locked_balance:.2f} >= ${max_locked:.2f}")
             return False
 
         # Перевіряємо доступний баланс для нової позиції
-        if self.available_balance < self.min_trade_amount:
-            logger.debug(f"[TechAnalysis] Недостатньо балансу: доступно ${self.available_balance:.2f}")
+        check_amount = required_amount if required_amount else self.min_trade_amount
+        if self.available_balance < check_amount:
+            logger.debug(f"[TechAnalysis] Недостатньо балансу: доступно ${self.available_balance:.2f}, потрібно ${check_amount:.2f}")
             return False
 
         return True
@@ -197,6 +199,19 @@ class TechAnalysisStrategy(BaseStrategy):
                 self.balance = 100.0
                 self._save_balance()
 
+            stats = conn.execute(
+                "SELECT SUM(pnl) as pnl, COUNT(*) as cnt FROM orders WHERE strategy_id=? AND status='closed'",
+                (self.strategy_id,)
+            ).fetchone()
+            if stats and stats['pnl']:
+                self.total_pnl = stats['pnl']
+                self.total_trades = stats['cnt']
+                self.winning_trades = conn.execute(
+                    "SELECT COUNT(*) FROM orders WHERE strategy_id=? AND status='closed' AND pnl > 0",
+                    (self.strategy_id,)
+                ).fetchone()[0]
+                self.losing_trades = self.total_trades - self.winning_trades
+
             orders = conn.execute(
                 "SELECT * FROM orders WHERE strategy_id=? AND status='open'",
                 (self.strategy_id,)
@@ -204,14 +219,16 @@ class TechAnalysisStrategy(BaseStrategy):
 
             for order in orders:
                 o = dict(order)
+                locked = o['quantity'] * o['price']
                 self.open_positions[o['symbol']] = {
                     'order_id': o['order_id'],
                     'entry_price': o['price'],
                     'quantity': o['quantity'],
+                    'locked_amount': locked,
                     'side': o['side'],
                     'opened_at': o.get('opened_at', datetime.now().isoformat())
                 }
-                self.locked_balance += o['quantity'] * o['price']
+                self.locked_balance += locked
 
     def _save_balance(self):
         with get_db() as conn:
@@ -527,6 +544,7 @@ class TechAnalysisStrategy(BaseStrategy):
             'order_id': order_id,
             'entry_price': price,
             'quantity': quantity,
+            'locked_amount': trade_amount,   # точна заблокована сума
             'side': side,
             'opened_at': datetime.now().isoformat(),
             'signal_type': 'LONG' if is_long else 'SHORT'
@@ -610,17 +628,19 @@ class TechAnalysisStrategy(BaseStrategy):
         quantity = position['quantity']
         side = position['side']
         order_id = position['order_id']
+        # Використовуємо точну заблоковану суму (зберігається при відкритті)
+        cost = position.get('locked_amount', quantity * entry_price)
+        revenue = quantity * price
 
-        # Розрахунок PnL
         if side == 'buy':
-            gross_pnl = (price - entry_price) * quantity
+            gross_pnl = revenue - cost
         else:
-            gross_pnl = (entry_price - price) * quantity
+            gross_pnl = cost - revenue
 
         commission_rate = 0.001
-        commission = (quantity * entry_price + quantity * price) * commission_rate
+        commission = (cost + revenue) * commission_rate
         pnl = gross_pnl - commission
-        pnl_percent = (pnl / (quantity * entry_price)) * 100 if quantity * entry_price > 0 else 0
+        pnl_percent = (pnl / cost) * 100 if cost > 0 else 0
 
         # Видаляємо з відкритих позицій
         del self.open_positions[symbol]
@@ -630,13 +650,15 @@ class TechAnalysisStrategy(BaseStrategy):
             result = await self.exchange.create_order(symbol, close_side, 'Market', quantity, price)
             if result.get('error'):
                 logger.error(f"[TechAnalysis] Помилка закриття позиції {symbol}: {result}")
+                # Повертаємо позицію назад
+                self.open_positions[symbol] = position
                 return
         else:
             logger.info(f"[TechAnalysis] ВІРТУАЛЬНЕ закриття: {symbol} @ ${price:.2f}")
 
-        # Оновлюємо баланс
-        self.balance += (quantity * price) - commission
-        self.locked_balance -= quantity * entry_price
+        # Повертаємо заблоковану суму + додаємо прибуток/збиток
+        self.balance += cost + pnl
+        self.locked_balance -= cost
         self.total_pnl += pnl
         self.total_trades += 1
 
@@ -645,12 +667,14 @@ class TechAnalysisStrategy(BaseStrategy):
         else:
             self.losing_trades += 1
 
-        # Оновлюємо ордер в БД
+        # Оновлюємо ордер в БД та зберігаємо баланс
         with get_db() as conn:
             conn.execute("""
                 UPDATE orders SET status='closed', closed_at=?, closed_price=?, pnl=?, commission=?
                 WHERE order_id=?
             """, (datetime.now().isoformat(), price, pnl, commission, order_id))
+
+        self._save_balance()
 
         reason_text = "🎯 Take Profit" if reason == "take_profit" else "🛑 Stop Loss"
         pnl_icon = "✅" if pnl >= 0 else "❌"
