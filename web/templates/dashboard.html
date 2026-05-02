@@ -2898,6 +2898,11 @@ async function testFileLogs() {
     }
 
     // Розрахунок діапазону для осі Y
+    const klinesMinDate = dates.length > 0 ? dates[0] : null;
+    const klinesMaxDate = dates.length > 0 ? dates[dates.length - 1] : null;
+    const entryInRange = entryDate && klinesMinDate && klinesMaxDate &&
+                         entryDate >= klinesMinDate && entryDate <= klinesMaxDate;
+
     const allPrices = [...closes, ...highs, ...lows];
     if (exitPrice) allPrices.push(exitPrice);
     // Включаємо ціну входу в діапазон ТІЛЬКИ якщо вона в межах свічок
@@ -2906,7 +2911,6 @@ async function testFileLogs() {
     const maxP = Math.max(...allPrices);
     const candleRange = Math.max(...highs) - Math.min(...lows);
     const pad = Math.max(candleRange * 0.08, (maxP - minP) * 0.05) || maxP * 0.005;
-    // Якщо ціна входу поза свічками — додаємо горизонтальну лінію але не змінюємо масштаб
     const yRangeMin = minP - pad;
     const yRangeMax = maxP + pad;
 
@@ -2927,10 +2931,6 @@ async function testFileLogs() {
     // Точка входу та горизонтальна лінія
     const entryColor = side === 'buy' ? '#00ff88' : '#ff4444';
     const entryText2 = side === 'buy' ? '🟢 ВХІД LONG' : '🔴 ВХІД SHORT';
-    const klinesMinDate = dates.length > 0 ? dates[0] : null;
-    const klinesMaxDate = dates.length > 0 ? dates[dates.length - 1] : null;
-    const entryInRange = entryDate && klinesMinDate && klinesMaxDate &&
-                         entryDate >= klinesMinDate && entryDate <= klinesMaxDate;
 
     if (entryDate && entryPrice) {
         if (entryInRange) {
